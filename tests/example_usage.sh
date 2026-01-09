@@ -1,0 +1,100 @@
+#!/bin/bash
+# Example usage of automated PE review tests
+# This script demonstrates how to run the tests in different modes
+
+echo "=========================================="
+echo "Automated PE Review Tests - Usage Examples"
+echo "=========================================="
+echo ""
+
+# Example 1: Run standalone test on a single file
+echo "Example 1: Test a single HDF5 file"
+echo "-----------------------------------"
+echo "Command:"
+echo "  python3 test_automated_review_standalone.py IGWN-GWTC3p0-v2-GW191215_223052_PEDataRelease_mixed_cosmo.h5"
+echo ""
+echo "This will:"
+echo "  - Load the posterior samples from the HDF5 file"
+echo "  - Run all automated review tests"
+echo "  - Print results to console"
+echo "  - Return exit code 0 (success) or 1 (failure)"
+echo ""
+
+# Example 2: Run with pytest
+echo "Example 2: Run via pytest"
+echo "-------------------------"
+echo "Command:"
+echo "  pytest test_automated_review.py -v"
+echo ""
+echo "This will:"
+echo "  - Discover all test methods in the file"
+echo "  - Run tests on all eligible productions in Asimov"
+echo "  - Generate HTML report after completion"
+echo "  - Show detailed test output with -v flag"
+echo ""
+
+# Example 3: Run with unittest
+echo "Example 3: Run via unittest"
+echo "---------------------------"
+echo "Command:"
+echo "  python3 -m unittest test_automated_review.TestAutomatedReview"
+echo ""
+echo "This will:"
+echo "  - Run the full test suite"
+echo "  - Generate HTML report"
+echo "  - Show unittest-style output"
+echo ""
+
+# Example 4: Run specific test
+echo "Example 4: Run a specific test only"
+echo "------------------------------------"
+echo "Command:"
+echo "  pytest test_automated_review.py::TestAutomatedReview::test_spin_magnitude_railing -v"
+echo ""
+echo "This will:"
+echo "  - Run only the spin railing test"
+echo "  - Useful for debugging specific issues"
+echo ""
+
+# Example 5: Integration with Asimov
+echo "Example 5: Run via Asimov test framework"
+echo "-----------------------------------------"
+echo "Command:"
+echo "  asimov test test_automated_review"
+echo ""
+echo "This will:"
+echo "  - Run tests within Asimov context"
+echo "  - Access event and production metadata"
+echo "  - Generate reports in correct locations"
+echo ""
+
+# Example 6: Check multiple files in batch
+echo "Example 6: Batch testing multiple files"
+echo "---------------------------------------"
+echo "Command:"
+echo "  for f in /path/to/events/*/*/pesummary/samples/posterior_samples.h5; do"
+echo "    echo \"Testing \$f\""
+echo "    python3 test_automated_review_standalone.py \"\$f\""
+echo "  done"
+echo ""
+echo "This will:"
+echo "  - Loop through all posterior sample files"
+echo "  - Run tests on each one"
+echo "  - Show results for each file"
+echo ""
+
+# Example 7: Save results to file
+echo "Example 7: Save test output to file"
+echo "------------------------------------"
+echo "Command:"
+echo "  python3 test_automated_review_standalone.py sample.h5 > results.txt 2>&1"
+echo ""
+echo "This will:"
+echo "  - Run tests and save output to results.txt"
+echo "  - Include both stdout and stderr"
+echo "  - Useful for batch processing and record-keeping"
+echo ""
+
+echo "=========================================="
+echo "For more information, see README_AUTOMATED_REVIEW.md"
+echo "=========================================="

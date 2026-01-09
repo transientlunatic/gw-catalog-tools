@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated PE Review Report - Example</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }
+
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+
+        .header h1 {
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }
+
+        .header .timestamp {
+            opacity: 0.9;
+            font-size: 0.9em;
+        }
+
+        .event-section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .event-name {
+            font-size: 1.8em;
+            margin: 0 0 20px 0;
+            color: #667eea;
+            border-bottom: 3px solid #667eea;
+            padding-bottom: 10px;
+        }
+
+        .production-section {
+            margin-bottom: 30px;
+            border-left: 4px solid #e0e0e0;
+            padding-left: 20px;
+        }
+
+        .production-name {
+            font-size: 1.3em;
+            margin: 0 0 15px 0;
+            color: #555;
+            font-weight: 600;
+        }
+
+        .test-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .test-card {
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafafa;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }
+
+        .test-card:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }
+
+        .test-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }
+
+        .test-name {
+            font-weight: 600;
+            color: #333;
+            font-size: 1.05em;
+        }
+
+        .status-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .status-PASS {
+            background: #d4edda;
+            color: #155724;
+        }
+
+        .status-FAIL {
+            background: #f8d7da;
+            color: #721c24;
+        }
+
+        .status-WARNING {
+            background: #fff3cd;
+            color: #856404;
+        }
+
+        .status-INFO {
+            background: #d1ecf1;
+            color: #0c5460;
+        }
+
+        .status-SKIP {
+            background: #e2e3e5;
+            color: #6c757d;
+        }
+
+        .test-message {
+            color: #666;
+            font-size: 0.95em;
+            margin-top: 8px;
+            line-height: 1.5;
+        }
+
+        .test-details {
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+            font-size: 0.9em;
+            font-family: 'Courier New', monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .summary-stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+
+        .stat-card {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }
+
+        .stat-label {
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }
+
+        .legend {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .legend-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+
+        .legend-item {
+            margin-bottom: 12px;
+            padding-left: 10px;
+            border-left: 4px solid #667eea;
+        }
+
+        .legend-item-name {
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 4px;
+        }
+
+        .legend-item-desc {
+            color: #666;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Automated PE Review Report</h1>
+        <div class="timestamp">Generated: 2026-01-09 12:30:00 (Example)</div>
+    </div>
+
+    <div class="summary-stats">
+        <div class="stat-card">
+            <div class="stat-value">11</div>
+            <div class="stat-label">PASS</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">1</div>
+            <div class="stat-label">FAIL</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">1</div>
+            <div class="stat-label">WARNING</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">1</div>
+            <div class="stat-label">INFO</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">0</div>
+            <div class="stat-label">SKIP</div>
+        </div>
+    </div>
+
+    <div class="legend">
+        <div class="legend-title">Test Descriptions</div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Spin Magnitude Railing</div>
+            <div class="legend-item-desc">
+                Checks if spin parameters (a_1, a_2, chi_eff, chi_p) are railing at their
+                physical bounds. Railing indicates the prior may be too restrictive or there
+                are sampler issues.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Effective Sample Size</div>
+            <div class="legend-item-desc">
+                Measures sampling efficiency by calculating ESS for key parameters. Low ESS
+                indicates high autocorrelation and poor convergence. ESS should be at least
+                10% of total samples.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Derived Parameter Consistency</div>
+            <div class="legend-item-desc">
+                Verifies that derived parameters match calculations from sampled parameters
+                (e.g., total_mass = mass_1 + mass_2). Inconsistencies suggest post-processing
+                errors or file corruption.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Log Evidence Sanity</div>
+            <div class="legend-item-desc">
+                Checks that log likelihood and log evidence values are finite and within
+                reasonable ranges. Unreasonable values indicate sampler failure or numerical
+                instability.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Sky Localization Quality</div>
+            <div class="legend-item-desc">
+                Calculates the 90% credible sky area. Very large areas (>1000 deg²) suggest
+                poor localization (may be expected for low-SNR events). Very small areas
+                (<0.01 deg²) may indicate sampling issues.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Network SNR Consistency</div>
+            <div class="legend-item-desc">
+                Verifies that network SNR equals the quadrature sum of individual detector
+                SNRs. Inconsistencies may indicate post-processing errors or incorrect SNR
+                calculations.
+            </div>
+        </div>
+    </div>
+
+    <div class="event-section">
+        <h2 class="event-name">GW191215_223052</h2>
+
+        <div class="production-section">
+            <h3 class="production-name">C01:IMRPhenomXPHM</h3>
+            <div class="test-grid">
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Spin Magnitude Railing</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">No spin railing detected</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "issues": []
+}</pre></div>
+                    </details>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Effective Sample Size</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">ESS acceptable for all parameters</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "luminosity_distance": {
+    "ess": 7017.2,
+    "fraction": 1.015
+  },
+  "chirp_mass": {
+    "ess": 6930.1,
+    "fraction": 1.003
+  },
+  "mass_ratio": {
+    "ess": 6886.4,
+    "fraction": 0.996
+  }
+}</pre></div>
+                    </details>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Derived Parameter Consistency</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">All checked parameters consistent</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "checks": [
+    "total_mass consistency: 0.00e+00",
+    "mass_ratio consistency: 0.00e+00",
+    "chirp_mass consistency: 3.39e-16"
+  ],
+  "issues": []
+}</pre></div>
+                    </details>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Log Evidence Sanity</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">Log evidence values are reasonable</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "log_likelihood": {
+    "max": 58.07,
+    "mean": 51.32,
+    "std": 2.53
+  }
+}</pre></div>
+                    </details>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Sky Localization Quality</div>
+                        <span class="status-badge status-INFO">INFO</span>
+                    </div>
+                    <div class="test-message">90% sky area: 245.3 deg²</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "area_90_deg2": 245.3
+}</pre></div>
+                    </details>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Network SNR Consistency</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">Mean network SNR: 10.9</div>
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{
+  "network_snr_mean": 10.89,
+  "detector_snrs": {
+    "H1": 6.90,
+    "L1": 8.24,
+    "V1": 1.48
+  },
+  "max_relative_error": 0.0001
+}</pre></div>
+                    </details>
+                </div>
+
+            </div>
+        </div>
+
+        <div class="production-section">
+            <h3 class="production-name">C01:SEOBNRv4PHM</h3>
+            <div class="test-grid">
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Spin Magnitude Railing</div>
+                        <span class="status-badge status-WARNING">WARNING</span>
+                    </div>
+                    <div class="test-message">chi_eff railing at lower bound, recommend adjusting to -0.850</div>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Effective Sample Size</div>
+                        <span class="status-badge status-FAIL">FAIL</span>
+                    </div>
+                    <div class="test-message">Low ESS detected: mass_ratio: ESS=412 (6.8% of 6043 samples)</div>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Derived Parameter Consistency</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">All checked parameters consistent</div>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Log Evidence Sanity</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">Log evidence values are reasonable</div>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Sky Localization Quality</div>
+                        <span class="status-badge status-INFO">INFO</span>
+                    </div>
+                    <div class="test-message">90% sky area: 256.1 deg²</div>
+                </div>
+
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">Network SNR Consistency</div>
+                        <span class="status-badge status-PASS">PASS</span>
+                    </div>
+                    <div class="test-message">Mean network SNR: 10.8</div>
+                </div>
+
+            </div>
+        </div>
+
+    </div>
+
+</body>
+</html>
