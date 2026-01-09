@@ -263,19 +263,16 @@ class TestAutomatedReview(AsimovTest):
 
     def test_spin_magnitude_railing(self):
         """
-        Check for railing in spin magnitude parameters.
+        Compare spin parameter posteriors to priors.
 
-        Spin magnitudes (a_1, a_2) have physical bounds [0, 1]. Railing at
-        zero is acceptable (non-spinning systems are physical), but railing
-        at 1.0 may indicate prior issues. Railing at 1.0 is also acceptable
-        as it represents maximally spinning black holes.
+        For spin parameters (a_1, a_2, chi_eff, chi_p), we compare the posterior
+        distribution to the prior. If the posterior shows significantly more
+        support for high spins (>0.7) than the prior, this indicates the data
+        prefers high-spin systems, which may warrant additional scrutiny.
 
-        Additionally, significant support (>10% of samples) above 0.7 is
-        flagged as a warning as it may indicate high-spin systems that warrant
-        attention.
-
-        This test checks for accumulation of samples at the boundaries using
-        the same railing detection as the distance/chirp_mass tests.
+        This approach avoids false positives from railing at physical boundaries
+        (0 and 1 are both valid spin values) and instead focuses on whether the
+        data is driving the posterior away from the prior in interesting ways.
         """
         for event in self.events:
             for production in event.productions:
@@ -298,74 +295,38 @@ class TestAutomatedReview(AsimovTest):
                         issues = []
                         warnings = []
 
-                        # Check a_1
-                        if 'a_1' in posterior.dtype.names:
-                            import peconfigurator.auxiliary.run_analyzer as configurator
-                            railing_down, railing_up, rec, bounds = configurator.railing_check(
-                                posterior["a_1"],
-                                Nbin=50,
-                                tolerance=2.0,
-                                label="a_1"
-                            )
+                        # Check spin parameters against prior
+                        # Compare posterior to prior to see if data is informative
 
-                            # Don't flag railing at 0 (non-spinning is physical)
-                            # Railing at 1.0 is also acceptable (maximally spinning BH)
+                        for param in ['a_1', 'a_2', 'chi_eff', 'chi_p']:
+                            if param not in posterior.dtype.names:
+                                continue
 
-                            # Check for significant support above 0.7
-                            frac_high_spin = np.sum(posterior["a_1"] > 0.7) / len(posterior["a_1"])
-                            if frac_high_spin > 0.1:
-                                warnings.append(f"a_1 has {frac_high_spin*100:.1f}% of samples > 0.7 (high spin)")
+                            if param not in prior or len(prior[param]) == 0:
+                                continue
 
-                        # Check a_2
-                        if 'a_2' in posterior.dtype.names:
-                            import peconfigurator.auxiliary.run_analyzer as configurator
-                            railing_down, railing_up, rec, bounds = configurator.railing_check(
-                                posterior["a_2"],
-                                Nbin=50,
-                                tolerance=2.0,
-                                label="a_2"
-                            )
+                            # Check if posterior shows high spin support
+                            if param in ['a_1', 'a_2', 'chi_p']:
+                                frac_high_spin = np.sum(posterior[param] > 0.7) / len(posterior[param])
+                                prior_frac_high = np.sum(prior[param] > 0.7) / len(prior[param]) if len(prior[param]) > 0 else 0
 
-                            # Don't flag railing at 0 (non-spinning is physical)
-                            # Railing at 1.0 is also acceptable (maximally spinning BH)
+                                # If significantly more high-spin samples than prior expects, flag it
+                                if frac_high_spin > prior_frac_high + 0.1:  # 10% more than prior
+                                    label = "high spin" if param != 'chi_p' else "high precession"
+                                    warnings.append(f"{param}: {frac_high_spin*100:.1f}% > 0.7 ({label}), prior: {prior_frac_high*100:.1f}%")
 
-                            # Check for significant support above 0.7
-                            frac_high_spin = np.sum(posterior["a_2"] > 0.7) / len(posterior["a_2"])
-                            if frac_high_spin > 0.1:
-                                warnings.append(f"a_2 has {frac_high_spin*100:.1f}% of samples > 0.7 (high spin)")
+                            # For chi_eff, check both tails
+                            elif param == 'chi_eff':
+                                # Check if clustering at bounds relative to prior
+                                post_upper = np.sum(posterior[param] > 0.9) / len(posterior[param])
+                                post_lower = np.sum(posterior[param] < -0.9) / len(posterior[param])
+                                prior_upper = np.sum(prior[param] > 0.9) / len(prior[param]) if len(prior[param]) > 0 else 0
+                                prior_lower = np.sum(prior[param] < -0.9) / len(prior[param]) if len(prior[param]) > 0 else 0
 
-                        # Check chi_eff (can be negative, so check both bounds)
-                        if 'chi_eff' in posterior.dtype.names:
-                            import peconfigurator.auxiliary.run_analyzer as configurator
-                            railing_down, railing_up, rec, bounds = configurator.railing_check(
-                                posterior["chi_eff"],
-                                Nbin=50,
-                                tolerance=2.0,
-                                label="chi_eff"
-                            )
-
-                            if railing_up:
-                                issues.append(f"chi_eff railing at upper bound, recommend adjusting to {bounds[1]:.3f}")
-                            if railing_down:
-                                issues.append(f"chi_eff railing at lower bound, recommend adjusting to {bounds[0]:.3f}")
-
-                        # Check chi_p (precessing spin, ranges 0-1)
-                        if 'chi_p' in posterior.dtype.names:
-                            import peconfigurator.auxiliary.run_analyzer as configurator
-                            railing_down, railing_up, rec, bounds = configurator.railing_check(
-                                posterior["chi_p"],
-                                Nbin=50,
-                                tolerance=2.0,
-                                label="chi_p"
-                            )
-
-                            # Don't flag railing at 0 (aligned spins are physical)
-                            # Railing at 1.0 is also acceptable
-
-                            # Check for significant support above 0.7
-                            frac_high_spin = np.sum(posterior["chi_p"] > 0.7) / len(posterior["chi_p"])
-                            if frac_high_spin > 0.1:
-                                warnings.append(f"chi_p has {frac_high_spin*100:.1f}% of samples > 0.7 (high precession)")
+                                if post_upper > prior_upper + 0.1:
+                                    warnings.append(f"chi_eff: {post_upper*100:.1f}% near +1, prior: {prior_upper*100:.1f}%")
+                                if post_lower > prior_lower + 0.1:
+                                    warnings.append(f"chi_eff: {post_lower*100:.1f}% near -1, prior: {prior_lower*100:.1f}%")
 
                         # Determine status: FAIL for issues, WARNING for warnings, PASS otherwise
                         if issues:
@@ -388,17 +349,18 @@ class TestAutomatedReview(AsimovTest):
 
     def test_effective_sample_size(self):
         """
-        Check effective sample size for key parameters.
+        Check number of samples is sufficient.
 
-        Low effective sample size (ESS) indicates poor sampling efficiency,
-        often due to high autocorrelation. This can happen when:
-        - Sampler step size is too small
-        - Posterior has strong correlations
-        - Sampler hasn't converged
+        For nested sampling, samples should be independent (IID), so we simply
+        check that enough samples were generated. Sample count thresholds:
+        - FAIL: < 2000 samples (insufficient for reliable posteriors)
+        - WARNING: 2000-5000 samples (marginal, may have large uncertainties)
+        - PASS: ≥ 5000 samples (good)
 
-        We check ESS for distance, chirp_mass, and mass_ratio as these are
-        typically well-constrained parameters. ESS should be at least 10% of
-        the total number of samples.
+        Low sample counts may indicate:
+        - Analysis terminated early
+        - Convergence issues
+        - Insufficient nlive or sampling time
         """
         for event in self.events:
             for production in event.productions:
@@ -410,7 +372,7 @@ class TestAutomatedReview(AsimovTest):
                         metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "effective_sample_size", {
+                            self.record_result(event.name, production.name, "sample_count", {
                                 "status": "SKIP",
                                 "message": "Metafile not found"
                             })
@@ -419,30 +381,112 @@ class TestAutomatedReview(AsimovTest):
                         posterior, prior = open_pesummary_samples(metafile)
                         n_samples = len(posterior)
 
-                        params_to_check = ['luminosity_distance', 'chirp_mass', 'mass_ratio']
-                        ess_results = {}
-                        issues = []
+                        fail_threshold = 2000
+                        warning_threshold = 5000
 
-                        for param in params_to_check:
-                            if param in posterior.dtype.names:
-                                ess = calculate_ess(posterior[param])
-                                ess_fraction = ess / n_samples
-                                ess_results[param] = {
-                                    "ess": ess,
-                                    "fraction": ess_fraction
-                                }
+                        if n_samples < fail_threshold:
+                            status = "FAIL"
+                            message = f"Only {n_samples} samples (minimum: {fail_threshold})"
+                        elif n_samples < warning_threshold:
+                            status = "WARNING"
+                            message = f"{n_samples} samples (recommended: ≥{warning_threshold})"
+                        else:
+                            status = "PASS"
+                            message = f"{n_samples} samples collected"
 
-                                if ess_fraction < 0.1:
-                                    issues.append(f"{param}: ESS={ess:.0f} ({ess_fraction*100:.1f}% of {n_samples} samples)")
-
-                        self.record_result(event.name, production.name, "effective_sample_size", {
-                            "status": "FAIL" if issues else "PASS",
-                            "message": f"Low ESS detected: {', '.join(issues)}" if issues else f"ESS acceptable for all parameters",
-                            "details": ess_results
+                        self.record_result(event.name, production.name, "sample_count", {
+                            "status": status,
+                            "message": message,
+                            "details": {
+                                "n_samples": n_samples,
+                                "fail_threshold": fail_threshold,
+                                "warning_threshold": warning_threshold
+                            }
                         })
 
-                        self.assertEqual(len(issues), 0,
-                                       msg=f"Low effective sample size detected:\n" + "\n".join(issues))
+                        self.assertGreaterEqual(n_samples, fail_threshold,
+                                       msg=f"Insufficient samples: {n_samples} < {fail_threshold}")
+
+    def test_multimodality(self):
+        """
+        Check for multimodality in key parameters.
+
+        Multimodal posteriors can indicate:
+        - Multiple valid solutions (e.g., mass ratio near 1 has symmetry)
+        - Poor convergence or mixing
+        - Interesting astrophysical features
+
+        We use a simple approach: check if the posterior has multiple well-separated
+        peaks by looking for significant gaps in the sorted samples. This is a
+        screening test - any flagged cases should be investigated further.
+
+        Parameters checked: mass_ratio, chirp_mass, luminosity_distance
+        """
+        for event in self.events:
+            for production in event.productions:
+                if (production.pipeline.name.lower() == "bilby") \
+                   and (production.status_str.lower() == "uploaded")\
+                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
+                    with self.subTest(event=event.name, production=production.name):
+
+                        metafile = get_metafile_path(event.name, production.name)
+
+                        if not os.path.exists(metafile):
+                            self.record_result(event.name, production.name, "multimodality", {
+                                "status": "SKIP",
+                                "message": "Metafile not found"
+                            })
+                            continue
+
+                        posterior, prior = open_pesummary_samples(metafile)
+
+                        warnings = []
+                        details = {}
+
+                        # Check key parameters for multimodality
+                        for param in ['mass_ratio', 'chirp_mass', 'luminosity_distance']:
+                            if param not in posterior.dtype.names:
+                                continue
+
+                            data = posterior[param]
+                            sorted_data = np.sort(data)
+
+                            # Look for large gaps that might indicate separate modes
+                            # A gap is "large" if it's much bigger than typical spacing
+                            diffs = np.diff(sorted_data)
+                            median_diff = np.median(diffs)
+                            large_gaps = diffs > 5 * median_diff  # Gap > 5x typical spacing
+
+                            if np.any(large_gaps):
+                                n_gaps = np.sum(large_gaps)
+                                max_gap = np.max(diffs[large_gaps])
+                                gap_fraction = max_gap / (np.max(data) - np.min(data))
+
+                                details[param] = {
+                                    'n_large_gaps': int(n_gaps),
+                                    'max_gap_fraction': float(gap_fraction),
+                                    'median_spacing': float(median_diff)
+                                }
+
+                                # Only warn if gap is significant (>5% of range)
+                                if gap_fraction > 0.05:
+                                    warnings.append(f"{param}: {n_gaps} large gap(s), max={gap_fraction*100:.1f}% of range")
+
+                        if warnings:
+                            status = "WARNING"
+                            message = "Possible multimodality: " + "; ".join(warnings)
+                        else:
+                            status = "PASS"
+                            message = "No significant multimodality detected"
+
+                        self.record_result(event.name, production.name, "multimodality", {
+                            "status": status,
+                            "message": message,
+                            "details": details
+                        })
+
+                        # Don't fail on multimodality, just warn
+                        # self.assertEqual(len(warnings), 0, msg="\n".join(warnings))
 
     def test_derived_parameter_consistency(self):
         """
@@ -1017,20 +1061,28 @@ class TestAutomatedReview(AsimovTest):
         <div class="legend-title">Test Descriptions</div>
 
         <div class="legend-item">
-            <div class="legend-item-name">Spin Magnitude Railing</div>
+            <div class="legend-item-name">Spin Parameter Comparison</div>
             <div class="legend-item-desc">
-                Checks if spin parameters (a_1, a_2, chi_eff, chi_p) are railing at their
-                physical bounds. Railing at 0 or 1 is acceptable for spin magnitudes.
-                Warns if >10% of samples have spins > 0.7 (high-spin systems).
+                Compares spin parameter posteriors (a_1, a_2, chi_eff, chi_p) to their priors.
+                Warns if posterior shows significantly more high-spin support (>0.7) than the
+                prior, indicating data preference for high spins that may warrant attention.
             </div>
         </div>
 
         <div class="legend-item">
-            <div class="legend-item-name">Effective Sample Size</div>
+            <div class="legend-item-name">Sample Count Check</div>
             <div class="legend-item-desc">
-                Measures sampling efficiency by calculating ESS for key parameters. Low ESS
-                indicates high autocorrelation and poor convergence. ESS should be at least
-                10% of total samples.
+                Verifies sufficient samples were collected. For nested sampling, samples are
+                independent (IID). Thresholds: FAIL if <2000, WARNING if 2000-5000, PASS if ≥5000.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Multimodality Check</div>
+            <div class="legend-item-desc">
+                Screens for multimodal posteriors by detecting large gaps in the distribution.
+                Multimodality can indicate multiple solutions, poor convergence, or interesting
+                astrophysics. Flagged cases warrant visual inspection of corner plots.
             </div>
         </div>
 

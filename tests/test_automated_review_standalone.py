@@ -42,100 +42,83 @@ def open_pesummary_samples(metafile):
     return posterior, prior
 
 
-def calculate_ess(samples):
-    """Calculate effective sample size using autocorrelation."""
-    n = len(samples)
-    if n < 2:
-        return n
-
-    samples = samples - np.mean(samples)
-    c0 = np.dot(samples, samples) / n
-    if c0 == 0:
-        return n
-
-    autocorr_sum = 0
-    for k in range(1, min(n, 1000)):
-        ck = np.dot(samples[:-k], samples[k:]) / (n - k)
-        autocorr_sum += ck / c0
-        if ck / c0 < 0.05:
-            break
-
-    ess = n / (1 + 2 * autocorr_sum)
-    return max(1, ess)
+# Removed calculate_ess - nested sampling produces IID samples
 
 
-def test_spin_railing(posterior):
+def test_spin_prior_comparison(posterior, prior):
     """
-    Test for spin parameter railing (simplified without peconfigurator).
+    Compare spin parameter posteriors to priors.
 
-    Railing at 0 or 1 is acceptable for spin magnitudes (a_1, a_2, chi_p).
-    Warns if >10% of samples are above 0.7 (high-spin systems).
-    For chi_eff, check both bounds as it can be negative.
+    For spin parameters (a_1, a_2, chi_eff, chi_p), we compare the posterior
+    distribution to the prior. If the posterior shows significantly more
+    support for high spins (>0.7) than the prior, this indicates the data
+    prefers high-spin systems.
     """
     print("\n" + "="*60)
-    print("SPIN MAGNITUDE RAILING TEST")
+    print("SPIN PARAMETER COMPARISON TO PRIOR")
     print("="*60)
 
     results = {}
 
     for param in ['a_1', 'a_2', 'chi_eff', 'chi_p']:
         if param not in posterior.dtype.names:
-            print(f"  {param}: NOT FOUND")
+            print(f"  {param}: NOT FOUND in posterior")
             continue
 
-        data = posterior[param]
+        if param not in prior or len(prior[param]) == 0:
+            print(f"  {param}: NOT FOUND in prior (skipping comparison)")
+            continue
+
+        post_data = posterior[param]
+        prior_data = prior[param]
 
         status = "PASS"
         warnings = []
 
         if param in ['a_1', 'a_2', 'chi_p']:
-            # For spin magnitudes: don't flag railing at 0 or 1 (both are physical)
-            # Instead, warn if significant support above 0.7
-            frac_high_spin = np.sum(data > 0.7) / len(data)
+            # Check if posterior has more high-spin support than prior
+            frac_high_post = np.sum(post_data > 0.7) / len(post_data)
+            frac_high_prior = np.sum(prior_data > 0.7) / len(prior_data)
 
-            if frac_high_spin > 0.1:
+            # Warn if posterior has significantly more (>10%) high-spin support
+            if frac_high_post > frac_high_prior + 0.1:
                 status = "WARNING"
                 label = "high spin" if param != 'chi_p' else "high precession"
-                warnings.append(f"{frac_high_spin*100:.1f}% of samples > 0.7 ({label})")
+                warnings.append(f"posterior {frac_high_post*100:.1f}% > 0.7 ({label}), prior {frac_high_prior*100:.1f}%")
 
             results[param] = {
                 'status': status,
-                'frac_high_spin': frac_high_spin,
+                'frac_high_post': frac_high_post,
+                'frac_high_prior': frac_high_prior,
                 'warnings': warnings,
-                'min': float(np.min(data)),
-                'max': float(np.max(data))
+                'post_min': float(np.min(post_data)),
+                'post_max': float(np.max(post_data))
             }
 
         else:  # chi_eff
-            # chi_eff can be negative, check railing at both bounds
-            data_range = 2.0  # -1 to 1
-            threshold = 0.05 * data_range
+            # Check if clustering at bounds relative to prior
+            post_upper = np.sum(post_data > 0.9) / len(post_data)
+            post_lower = np.sum(post_data < -0.9) / len(post_data)
+            prior_upper = np.sum(prior_data > 0.9) / len(prior_data)
+            prior_lower = np.sum(prior_data < -0.9) / len(prior_data)
 
-            n_near_lower = np.sum(data < (-1.0 + threshold))
-            n_near_upper = np.sum(data > (1.0 - threshold))
-
-            frac_lower = n_near_lower / len(data)
-            frac_upper = n_near_upper / len(data)
-
-            issues = []
-            if frac_upper > 0.1:
+            if post_upper > prior_upper + 0.1:
                 status = "WARNING"
-                issues.append(f"upper bound ({frac_upper*100:.1f}%)")
-
-            if frac_lower > 0.1:
+                warnings.append(f"posterior {post_upper*100:.1f}% near +1, prior {prior_upper*100:.1f}%")
+            if post_lower > prior_lower + 0.1:
                 status = "WARNING"
-                issues.append(f"lower bound ({frac_lower*100:.1f}%)")
+                warnings.append(f"posterior {post_lower*100:.1f}% near -1, prior {prior_lower*100:.1f}%")
 
             results[param] = {
                 'status': status,
-                'frac_lower': frac_lower,
-                'frac_upper': frac_upper,
-                'issues': issues,
-                'min': float(np.min(data)),
-                'max': float(np.max(data))
+                'post_upper': post_upper,
+                'post_lower': post_lower,
+                'prior_upper': prior_upper,
+                'prior_lower': prior_lower,
+                'warnings': warnings,
+                'post_min': float(np.min(post_data)),
+                'post_max': float(np.max(post_data))
             }
-
-            warnings = issues
 
         if warnings:
             print(f"  {param}: {status} - {'; '.join(warnings)}")
@@ -145,35 +128,85 @@ def test_spin_railing(posterior):
     return results
 
 
-def test_effective_sample_size(posterior):
-    """Test effective sample size for key parameters."""
+def test_sample_count(posterior):
+    """Test that sufficient samples were collected."""
     print("\n" + "="*60)
-    print("EFFECTIVE SAMPLE SIZE TEST")
+    print("SAMPLE COUNT CHECK")
     print("="*60)
 
     n_samples = len(posterior)
-    print(f"  Total samples: {n_samples}")
+    fail_threshold = 2000
+    warning_threshold = 5000
+
+    if n_samples < fail_threshold:
+        status = "FAIL"
+        print(f"  Total samples: {n_samples} - {status}")
+        print(f"  Minimum required: {fail_threshold}")
+    elif n_samples < warning_threshold:
+        status = "WARNING"
+        print(f"  Total samples: {n_samples} - {status}")
+        print(f"  Recommended: ≥{warning_threshold}")
+    else:
+        status = "PASS"
+        print(f"  Total samples: {n_samples} - {status}")
+
+    results = {
+        'n_samples': n_samples,
+        'fail_threshold': fail_threshold,
+        'warning_threshold': warning_threshold,
+        'status': status
+    }
+
+    return results
+
+
+def test_multimodality(posterior):
+    """Check for multimodality in key parameters."""
+    print("\n" + "="*60)
+    print("MULTIMODALITY CHECK")
+    print("="*60)
 
     results = {}
-    params_to_check = ['luminosity_distance', 'chirp_mass', 'mass_ratio', 'mass_1', 'mass_2']
+    warnings = []
 
-    for param in params_to_check:
+    for param in ['mass_ratio', 'chirp_mass', 'luminosity_distance']:
         if param not in posterior.dtype.names:
             print(f"  {param}: NOT FOUND")
             continue
 
-        ess = calculate_ess(posterior[param])
-        ess_fraction = ess / n_samples
+        data = posterior[param]
+        sorted_data = np.sort(data)
 
-        status = "PASS" if ess_fraction >= 0.1 else "WARNING"
+        # Look for large gaps that might indicate separate modes
+        diffs = np.diff(sorted_data)
+        median_diff = np.median(diffs)
+        large_gaps = diffs > 5 * median_diff
 
-        print(f"  {param}: ESS={ess:.0f} ({ess_fraction*100:.1f}% of total) - {status}")
+        if np.any(large_gaps):
+            n_gaps = np.sum(large_gaps)
+            max_gap = np.max(diffs[large_gaps])
+            gap_fraction = max_gap / (np.max(data) - np.min(data))
 
-        results[param] = {
-            'ess': float(ess),
-            'fraction': float(ess_fraction),
-            'status': status
-        }
+            results[param] = {
+                'n_large_gaps': int(n_gaps),
+                'max_gap_fraction': float(gap_fraction),
+                'median_spacing': float(median_diff)
+            }
+
+            if gap_fraction > 0.05:
+                status = "WARNING"
+                warnings.append(f"{n_gaps} large gap(s), max={gap_fraction*100:.1f}% of range")
+                print(f"  {param}: {status} - {warnings[-1]}")
+            else:
+                status = "PASS"
+                print(f"  {param}: {status}")
+        else:
+            status = "PASS"
+            print(f"  {param}: {status}")
+            results[param] = {'status': status}
+
+    if not warnings:
+        print("  Overall: PASS - No significant multimodality detected")
 
     return results
 
@@ -349,14 +382,19 @@ def main():
     all_results = {}
 
     try:
-        all_results['spin_railing'] = test_spin_railing(posterior)
+        all_results['spin_prior_comparison'] = test_spin_prior_comparison(posterior, prior)
     except Exception as e:
-        print(f"\nERROR in spin_railing test: {e}")
+        print(f"\nERROR in spin_prior_comparison test: {e}")
 
     try:
-        all_results['effective_sample_size'] = test_effective_sample_size(posterior)
+        all_results['sample_count'] = test_sample_count(posterior)
     except Exception as e:
-        print(f"\nERROR in effective_sample_size test: {e}")
+        print(f"\nERROR in sample_count test: {e}")
+
+    try:
+        all_results['multimodality'] = test_multimodality(posterior)
+    except Exception as e:
+        print(f"\nERROR in multimodality test: {e}")
 
     try:
         all_results['parameter_consistency'] = test_parameter_consistency(posterior)
