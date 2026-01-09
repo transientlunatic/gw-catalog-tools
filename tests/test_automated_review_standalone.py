@@ -14,14 +14,14 @@ Example:
 
 import sys
 import numpy as np
-import h5py
+import h5py as h5
 import argparse
 from datetime import datetime
 
 
 def open_pesummary_samples(metafile):
     """Open and extract posterior and prior samples from PESummary HDF5 file."""
-    with h5py.File(metafile, 'r') as metafile_h:
+    with h5.File(metafile, 'r') as metafile_h:
         analyses = list(metafile_h.keys())
         if "history" in analyses:
             analyses.remove("history")
@@ -65,7 +65,13 @@ def calculate_ess(samples):
 
 
 def test_spin_railing(posterior):
-    """Test for spin parameter railing (simplified without peconfigurator)."""
+    """
+    Test for spin parameter railing (simplified without peconfigurator).
+
+    Railing at 0 or 1 is acceptable for spin magnitudes (a_1, a_2, chi_p).
+    Warns if >10% of samples are above 0.7 (high-spin systems).
+    For chi_eff, check both bounds as it can be negative.
+    """
     print("\n" + "="*60)
     print("SPIN MAGNITUDE RAILING TEST")
     print("="*60)
@@ -79,44 +85,62 @@ def test_spin_railing(posterior):
 
         data = posterior[param]
 
-        # Simple railing check: look at fraction of samples near boundaries
-        if param in ['a_1', 'a_2', 'chi_p']:
-            lower_bound, upper_bound = 0.0, 1.0
-        else:  # chi_eff
-            lower_bound, upper_bound = -1.0, 1.0
-
-        data_range = upper_bound - lower_bound
-        threshold = 0.05 * data_range  # 5% of range
-
-        n_near_lower = np.sum(data < (lower_bound + threshold))
-        n_near_upper = np.sum(data > (upper_bound - threshold))
-
-        frac_lower = n_near_lower / len(data)
-        frac_upper = n_near_upper / len(data)
-
         status = "PASS"
-        issues = []
+        warnings = []
 
-        if frac_upper > 0.1:  # More than 10% of samples
-            status = "WARNING"
-            issues.append(f"upper bound ({frac_upper*100:.1f}%)")
+        if param in ['a_1', 'a_2', 'chi_p']:
+            # For spin magnitudes: don't flag railing at 0 or 1 (both are physical)
+            # Instead, warn if significant support above 0.7
+            frac_high_spin = np.sum(data > 0.7) / len(data)
 
-        if frac_lower > 0.1:
-            status = "WARNING"
-            issues.append(f"lower bound ({frac_lower*100:.1f}%)")
+            if frac_high_spin > 0.1:
+                status = "WARNING"
+                label = "high spin" if param != 'chi_p' else "high precession"
+                warnings.append(f"{frac_high_spin*100:.1f}% of samples > 0.7 ({label})")
 
-        if issues:
-            print(f"  {param}: {status} - potential railing at {', '.join(issues)}")
+            results[param] = {
+                'status': status,
+                'frac_high_spin': frac_high_spin,
+                'warnings': warnings,
+                'min': float(np.min(data)),
+                'max': float(np.max(data))
+            }
+
+        else:  # chi_eff
+            # chi_eff can be negative, check railing at both bounds
+            data_range = 2.0  # -1 to 1
+            threshold = 0.05 * data_range
+
+            n_near_lower = np.sum(data < (-1.0 + threshold))
+            n_near_upper = np.sum(data > (1.0 - threshold))
+
+            frac_lower = n_near_lower / len(data)
+            frac_upper = n_near_upper / len(data)
+
+            issues = []
+            if frac_upper > 0.1:
+                status = "WARNING"
+                issues.append(f"upper bound ({frac_upper*100:.1f}%)")
+
+            if frac_lower > 0.1:
+                status = "WARNING"
+                issues.append(f"lower bound ({frac_lower*100:.1f}%)")
+
+            results[param] = {
+                'status': status,
+                'frac_lower': frac_lower,
+                'frac_upper': frac_upper,
+                'issues': issues,
+                'min': float(np.min(data)),
+                'max': float(np.max(data))
+            }
+
+            warnings = issues
+
+        if warnings:
+            print(f"  {param}: {status} - {'; '.join(warnings)}")
         else:
             print(f"  {param}: {status}")
-
-        results[param] = {
-            'status': status,
-            'frac_lower': frac_lower,
-            'frac_upper': frac_upper,
-            'min': float(np.min(data)),
-            'max': float(np.max(data))
-        }
 
     return results
 

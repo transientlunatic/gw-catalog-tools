@@ -17,12 +17,43 @@ Tests are designed to run without requiring trained ML models.
 """
 
 from asimov.testing import AsimovTest
+from asimov import config
 import numpy as np
-import h5py
+import h5py as h5
 import os
 from datetime import datetime
 from collections import defaultdict
 import json
+
+
+def get_metafile_path(event_name, production_name):
+    """
+    Get the path to the posterior_samples.h5 file using asimov config.
+
+    Parameters
+    ----------
+    event_name : str
+        Name of the event
+    production_name : str
+        Name of the production/analysis
+
+    Returns
+    -------
+    metafile : str
+        Full path to posterior_samples.h5
+    """
+    webroot = config.get("general", "webroot")
+    project_root = config.get("project", "root", fallback="")
+
+    if project_root:
+        metafile = os.path.join(project_root, webroot, event_name,
+                               production_name, "pesummary", "samples",
+                               "posterior_samples.h5")
+    else:
+        metafile = os.path.join(webroot, event_name, production_name,
+                               "pesummary", "samples", "posterior_samples.h5")
+
+    return metafile
 
 
 def open_pesummary_samples(metafile):
@@ -235,7 +266,13 @@ class TestAutomatedReview(AsimovTest):
         Check for railing in spin magnitude parameters.
 
         Spin magnitudes (a_1, a_2) have physical bounds [0, 1]. Railing at
-        these bounds may indicate prior is too restrictive or sampler issues.
+        zero is acceptable (non-spinning systems are physical), but railing
+        at 1.0 may indicate prior issues. Railing at 1.0 is also acceptable
+        as it represents maximally spinning black holes.
+
+        Additionally, significant support (>10% of samples) above 0.7 is
+        flagged as a warning as it may indicate high-spin systems that warrant
+        attention.
 
         This test checks for accumulation of samples at the boundaries using
         the same railing detection as the distance/chirp_mass tests.
@@ -247,7 +284,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "spin_railing", {
@@ -259,6 +296,7 @@ class TestAutomatedReview(AsimovTest):
                         posterior, prior = open_pesummary_samples(metafile)
 
                         issues = []
+                        warnings = []
 
                         # Check a_1
                         if 'a_1' in posterior.dtype.names:
@@ -270,10 +308,13 @@ class TestAutomatedReview(AsimovTest):
                                 label="a_1"
                             )
 
-                            if railing_up:
-                                issues.append(f"a_1 railing at upper bound (near 1.0), recommend adjusting to {bounds[1]:.3f}")
-                            if railing_down:
-                                issues.append(f"a_1 railing at lower bound (near 0.0), recommend adjusting to {bounds[0]:.3f}")
+                            # Don't flag railing at 0 (non-spinning is physical)
+                            # Railing at 1.0 is also acceptable (maximally spinning BH)
+
+                            # Check for significant support above 0.7
+                            frac_high_spin = np.sum(posterior["a_1"] > 0.7) / len(posterior["a_1"])
+                            if frac_high_spin > 0.1:
+                                warnings.append(f"a_1 has {frac_high_spin*100:.1f}% of samples > 0.7 (high spin)")
 
                         # Check a_2
                         if 'a_2' in posterior.dtype.names:
@@ -285,12 +326,15 @@ class TestAutomatedReview(AsimovTest):
                                 label="a_2"
                             )
 
-                            if railing_up:
-                                issues.append(f"a_2 railing at upper bound (near 1.0), recommend adjusting to {bounds[1]:.3f}")
-                            if railing_down:
-                                issues.append(f"a_2 railing at lower bound (near 0.0), recommend adjusting to {bounds[0]:.3f}")
+                            # Don't flag railing at 0 (non-spinning is physical)
+                            # Railing at 1.0 is also acceptable (maximally spinning BH)
 
-                        # Check chi_eff
+                            # Check for significant support above 0.7
+                            frac_high_spin = np.sum(posterior["a_2"] > 0.7) / len(posterior["a_2"])
+                            if frac_high_spin > 0.1:
+                                warnings.append(f"a_2 has {frac_high_spin*100:.1f}% of samples > 0.7 (high spin)")
+
+                        # Check chi_eff (can be negative, so check both bounds)
                         if 'chi_eff' in posterior.dtype.names:
                             import peconfigurator.auxiliary.run_analyzer as configurator
                             railing_down, railing_up, rec, bounds = configurator.railing_check(
@@ -305,7 +349,7 @@ class TestAutomatedReview(AsimovTest):
                             if railing_down:
                                 issues.append(f"chi_eff railing at lower bound, recommend adjusting to {bounds[0]:.3f}")
 
-                        # Check chi_p
+                        # Check chi_p (precessing spin, ranges 0-1)
                         if 'chi_p' in posterior.dtype.names:
                             import peconfigurator.auxiliary.run_analyzer as configurator
                             railing_down, railing_up, rec, bounds = configurator.railing_check(
@@ -315,15 +359,29 @@ class TestAutomatedReview(AsimovTest):
                                 label="chi_p"
                             )
 
-                            if railing_up:
-                                issues.append(f"chi_p railing at upper bound, recommend adjusting to {bounds[1]:.3f}")
-                            if railing_down:
-                                issues.append(f"chi_p railing at lower bound, recommend adjusting to {bounds[0]:.3f}")
+                            # Don't flag railing at 0 (aligned spins are physical)
+                            # Railing at 1.0 is also acceptable
+
+                            # Check for significant support above 0.7
+                            frac_high_spin = np.sum(posterior["chi_p"] > 0.7) / len(posterior["chi_p"])
+                            if frac_high_spin > 0.1:
+                                warnings.append(f"chi_p has {frac_high_spin*100:.1f}% of samples > 0.7 (high precession)")
+
+                        # Determine status: FAIL for issues, WARNING for warnings, PASS otherwise
+                        if issues:
+                            status = "FAIL"
+                            message = "; ".join(issues)
+                        elif warnings:
+                            status = "WARNING"
+                            message = "; ".join(warnings)
+                        else:
+                            status = "PASS"
+                            message = "No spin railing issues detected"
 
                         self.record_result(event.name, production.name, "spin_railing", {
-                            "status": "FAIL" if issues else "PASS",
-                            "message": "; ".join(issues) if issues else "No spin railing detected",
-                            "details": {"issues": issues}
+                            "status": status,
+                            "message": message,
+                            "details": {"issues": issues, "warnings": warnings}
                         })
 
                         self.assertEqual(len(issues), 0, msg="\n".join(issues))
@@ -349,7 +407,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "effective_sample_size", {
@@ -407,7 +465,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "parameter_consistency", {
@@ -488,7 +546,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "log_evidence_sanity", {
@@ -566,7 +624,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "sky_localization", {
@@ -631,7 +689,7 @@ class TestAutomatedReview(AsimovTest):
                    and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
                     with self.subTest(event=event.name, production=production.name):
 
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
+                        metafile = get_metafile_path(event.name, production.name)
 
                         if not os.path.exists(metafile):
                             self.record_result(event.name, production.name, "network_snr", {
@@ -694,6 +752,378 @@ class TestAutomatedReview(AsimovTest):
 
                         self.assertEqual(len(issues), 0,
                                        msg=f"Network SNR inconsistency:\n" + "\n".join(issues))
+
+    @classmethod
+    def generate_event_html(cls, event_name, event_results, timestamp):
+        """
+        Generate HTML report for a single event showing only that event's results.
+
+        Parameters
+        ----------
+        event_name : str
+            Name of the event
+        event_results : dict
+            Dictionary of production results for this event
+        timestamp : str
+            Timestamp string for the report header
+
+        Returns
+        -------
+        html : str
+            Complete HTML document as a string
+        """
+        # Calculate summary statistics for this event only
+        total_tests = 0
+        status_counts = defaultdict(int)
+
+        for production_results in event_results.values():
+            for result in production_results.values():
+                total_tests += 1
+                status_counts[result['status']] += 1
+
+        html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Automated PE Review Report - {event_name}</title>
+    <style>
+        body {{
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f5f5f5;
+        }}
+
+        .header {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 30px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }}
+
+        .header h1 {{
+            margin: 0 0 10px 0;
+            font-size: 2.5em;
+        }}
+
+        .header .event-title {{
+            font-size: 1.5em;
+            opacity: 0.95;
+            margin-top: 10px;
+        }}
+
+        .header .timestamp {{
+            opacity: 0.9;
+            font-size: 0.9em;
+        }}
+
+        .event-section {{
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+
+        .production-section {{
+            margin-bottom: 30px;
+            border-left: 4px solid #667eea;
+            padding-left: 20px;
+        }}
+
+        .production-name {{
+            font-size: 1.3em;
+            margin: 0 0 15px 0;
+            color: #555;
+            font-weight: 600;
+        }}
+
+        .test-grid {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }}
+
+        .test-card {{
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 15px;
+            background: #fafafa;
+            transition: transform 0.2s, box-shadow 0.2s;
+        }}
+
+        .test-card:hover {{
+            transform: translateY(-2px);
+            box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+        }}
+
+        .test-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 10px;
+        }}
+
+        .test-name {{
+            font-weight: 600;
+            color: #333;
+            font-size: 1.05em;
+        }}
+
+        .status-badge {{
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }}
+
+        .status-PASS {{
+            background: #d4edda;
+            color: #155724;
+        }}
+
+        .status-FAIL {{
+            background: #f8d7da;
+            color: #721c24;
+        }}
+
+        .status-WARNING {{
+            background: #fff3cd;
+            color: #856404;
+        }}
+
+        .status-INFO {{
+            background: #d1ecf1;
+            color: #0c5460;
+        }}
+
+        .status-SKIP {{
+            background: #e2e3e5;
+            color: #6c757d;
+        }}
+
+        .test-message {{
+            color: #666;
+            font-size: 0.95em;
+            margin-top: 8px;
+            line-height: 1.5;
+        }}
+
+        .test-details {{
+            margin-top: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 5px;
+            border: 1px solid #e0e0e0;
+            font-size: 0.9em;
+            font-family: 'Courier New', monospace;
+            max-height: 200px;
+            overflow-y: auto;
+        }}
+
+        .summary-stats {{
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }}
+
+        .stat-card {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            text-align: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+
+        .stat-value {{
+            font-size: 2em;
+            font-weight: bold;
+            color: #667eea;
+        }}
+
+        .stat-label {{
+            color: #666;
+            font-size: 0.9em;
+            margin-top: 5px;
+        }}
+
+        .legend {{
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 30px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+
+        .legend-title {{
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }}
+
+        .legend-item {{
+            margin-bottom: 12px;
+            padding-left: 10px;
+            border-left: 4px solid #667eea;
+        }}
+
+        .legend-item-name {{
+            font-weight: 600;
+            color: #555;
+            margin-bottom: 4px;
+        }}
+
+        .legend-item-desc {{
+            color: #666;
+            font-size: 0.95em;
+            line-height: 1.5;
+        }}
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>Automated PE Review Report</h1>
+        <div class="event-title">{event_name}</div>
+        <div class="timestamp">Generated: {timestamp}</div>
+    </div>
+
+    <div class="summary-stats">
+"""
+
+        for status in ['PASS', 'FAIL', 'WARNING', 'INFO', 'SKIP']:
+            count = status_counts.get(status, 0)
+            html += f"""
+        <div class="stat-card">
+            <div class="stat-value">{count}</div>
+            <div class="stat-label">{status}</div>
+        </div>
+"""
+
+        html += """
+    </div>
+
+    <div class="legend">
+        <div class="legend-title">Test Descriptions</div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Spin Magnitude Railing</div>
+            <div class="legend-item-desc">
+                Checks if spin parameters (a_1, a_2, chi_eff, chi_p) are railing at their
+                physical bounds. Railing at 0 or 1 is acceptable for spin magnitudes.
+                Warns if >10% of samples have spins > 0.7 (high-spin systems).
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Effective Sample Size</div>
+            <div class="legend-item-desc">
+                Measures sampling efficiency by calculating ESS for key parameters. Low ESS
+                indicates high autocorrelation and poor convergence. ESS should be at least
+                10% of total samples.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Derived Parameter Consistency</div>
+            <div class="legend-item-desc">
+                Verifies that derived parameters match calculations from sampled parameters
+                (e.g., total_mass = mass_1 + mass_2). Inconsistencies suggest post-processing
+                errors or file corruption.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Log Evidence Sanity</div>
+            <div class="legend-item-desc">
+                Checks that log likelihood and log evidence values are finite and within
+                reasonable ranges. Unreasonable values indicate sampler failure or numerical
+                instability.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Sky Localization Quality</div>
+            <div class="legend-item-desc">
+                Calculates the 90% credible sky area. Very large areas (>1000 deg²) suggest
+                poor localization (may be expected for low-SNR events). Very small areas
+                (<0.01 deg²) may indicate sampling issues.
+            </div>
+        </div>
+
+        <div class="legend-item">
+            <div class="legend-item-name">Network SNR Consistency</div>
+            <div class="legend-item-desc">
+                Verifies that network SNR equals the quadrature sum of individual detector
+                SNRs. Inconsistencies may indicate post-processing errors or incorrect SNR
+                calculations.
+            </div>
+        </div>
+    </div>
+
+    <div class="event-section">
+"""
+
+        # Add results for each production in this event
+        for production_name, production_results in sorted(event_results.items()):
+            html += f"""
+        <div class="production-section">
+            <h3 class="production-name">{production_name}</h3>
+            <div class="test-grid">
+"""
+
+            for test_name, result in sorted(production_results.items()):
+                status = result['status']
+                message = result['message']
+                details = result.get('details', {})
+
+                # Format test name nicely
+                test_display = test_name.replace('_', ' ').title()
+
+                html += f"""
+                <div class="test-card">
+                    <div class="test-header">
+                        <div class="test-name">{test_display}</div>
+                        <span class="status-badge status-{status}">{status}</span>
+                    </div>
+                    <div class="test-message">{message}</div>
+"""
+
+                if details:
+                    details_json = json.dumps(details, indent=2)
+                    html += f"""
+                    <details>
+                        <summary style="cursor: pointer; color: #667eea; margin-top: 10px;">Show Details</summary>
+                        <div class="test-details"><pre>{details_json}</pre></div>
+                    </details>
+"""
+
+                html += """
+                </div>
+"""
+
+            html += """
+            </div>
+        </div>
+"""
+
+        html += """
+    </div>
+</body>
+</html>
+"""
+
+        return html
 
     @classmethod
     def generate_html_report(cls):
@@ -1073,10 +1503,22 @@ class TestAutomatedReview(AsimovTest):
 """
 
         # Save report to each production directory
+        # Generate a report per event that only shows that event's results
         for event_name, event_results in cls.test_results.items():
+            # Create event-specific HTML report
+            event_html = cls.generate_event_html(event_name, event_results, timestamp)
+
             for production_name in event_results.keys():
-                # Construct path to production directory
-                report_path = f"/home/pe.o4/public_html/gwtc4-fogg/{event_name}/{production_name}/automated_review.html"
+                # Construct path to production directory using config
+                webroot = config.get("general", "webroot")
+                project_root = config.get("project", "root", fallback="")
+
+                if project_root:
+                    report_path = os.path.join(project_root, webroot, event_name,
+                                              production_name, "automated_review.html")
+                else:
+                    report_path = os.path.join(webroot, event_name, production_name,
+                                              "automated_review.html")
 
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(report_path), exist_ok=True)
@@ -1084,7 +1526,7 @@ class TestAutomatedReview(AsimovTest):
                 # Write report
                 try:
                     with open(report_path, 'w') as f:
-                        f.write(html)
+                        f.write(event_html)
                     print(f"Generated automated review report: {report_path}")
                 except Exception as e:
                     print(f"Warning: Could not write report to {report_path}: {e}")
