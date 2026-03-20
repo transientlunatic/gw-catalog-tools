@@ -19,11 +19,14 @@ Tests are designed to run without requiring trained ML models.
 from asimov.testing import AsimovTest
 from asimov import config
 import numpy as np
-import h5py as h5
 import os
+import sys
 from datetime import datetime
 from collections import defaultdict
 import json
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+from ledger import open_pesummary_samples
 
 
 def get_metafile_path(event_name, production_name):
@@ -54,38 +57,6 @@ def get_metafile_path(event_name, production_name):
                                "pesummary", "samples", "posterior_samples.h5")
 
     return metafile
-
-
-def open_pesummary_samples(metafile):
-    """
-    Open and extract posterior and prior samples from PESummary HDF5 file.
-
-    Parameters
-    ----------
-    metafile : str
-        Path to the posterior_samples.h5 file
-
-    Returns
-    -------
-    posterior : numpy.ndarray
-        Structured array containing posterior samples
-    prior : dict
-        Dictionary of prior samples for each parameter
-    """
-    with h5.File(metafile) as metafile_h:
-        analyses = list(metafile_h.keys())
-        if "history" in analyses:
-            analyses.remove("history")
-        if "version" in analyses:
-            analyses.remove("version")
-
-        key = analyses[0]
-
-        posterior = np.array(metafile_h[key]['posterior_samples'])
-        prior = dict(metafile_h[key]['priors']['samples'])
-        prior = {name: np.array(data) for name, data in prior.items()}
-
-    return posterior, prior
 
 
 def calculate_ess(samples):
@@ -486,7 +457,6 @@ class TestAutomatedReview(AsimovTest):
                         })
 
                         # Don't fail on multimodality, just warn
-                        # self.assertEqual(len(warnings), 0, msg="\n".join(warnings))
 
     def test_derived_parameter_consistency(self):
         """
@@ -708,7 +678,6 @@ class TestAutomatedReview(AsimovTest):
                         })
 
                         # Don't fail test, just record information
-                        # self.assertTrue(True)
 
     def test_network_snr_consistency(self):
         """

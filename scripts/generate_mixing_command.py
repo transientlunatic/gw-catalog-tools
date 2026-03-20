@@ -1,85 +1,80 @@
 """
-This script takes an event name as an argument and prints a list of bilby analyses which are marked as "APPROVED" in the asimov project.
+Stage 2B: generate Makefile rules to assemble the full combined release file.
+
+For each event, takes the Stage 2A summarypages output (which has spin
+evolution applied) and:
+  1. Copies the combined metafile into releases/$(RELEASE)/{event}/C00-Combined.h5
+  2. Renames each internal waveform label to the canonical C00:<WaveformName> form
+  3. Runs summarycombine_posteriors to produce the C00:Mixed combined posterior
+
+Only APPROVED bilby analyses are included.
+
+Run from the project directory:
+    python ../scripts/generate_mixing_command.py > ../mixing_release.mk
 """
-import yaml
 import sys
+sys.path.insert(0, "..")
+from scripts.ledger import (
+    load_ledger, get_events, approved_bilby_productions, release_label
+)
 
-with open(".asimov/ledger.yml", "r") as ledger_file:
-    data = yaml.safe_load(ledger_file)
-    
-events = {event['name']: event for event in data['events']}
+data = load_ledger(".asimov/ledger.yml")
+events = get_events(data)
 
-
+# Stage 2A output lives alongside the Stage 0 review pages but in a separate
+# subdirectory so the two can never contaminate each other.
 recipe = """
-releases/${{RELEASE}}/{event}/C00-Combined-XO4a.h5: ${{WEB_PATH}}/{event}/combined/samples/posterior_samples.h5
-	mkdir -p $(@D)
-	cp $< $@
+releases/${{RELEASE}}/{event}/C00-Combined.h5: ${{WEB_PATH}}/{event}/combined-release/samples/posterior_samples.h5
+\tmkdir -p $(@D)
+\tcp $< $@"""
+
+rename = """\t${{SUMMARYMODIFY}} \\
+\t--samples $@ \\
+\t--delimiter _ \\
+\t--labels {production}_{new_label} \\
+\t--overwrite \\
+\t--webdir $(@D)
 """
 
-rename = r"""	${{SUMMARYMODIFY}} \
-	--samples $@ \
-	--delimiter _ \
-	--labels {analysis}_{new_name} \
-	--overwrite \
-	--webdir $(@D)
+combine = """\t${{SUMMARY_COMBINE_POSTERIORS}} \\
+\t--samples $@ \\
+\t--labels {labels} \\
+\t--outdir $(@D) \\
+\t--add_to_existing
+
+\t${{SUMMARYMODIFY}} \\
+\t--samples $(@D)/C00-Combined_combined.h5 \\
+\t--delimiter / \\
+\t--overwrite \\
+\t--labels {labels_joined}_combined/C00:Mixed \\
+\t--webdir $(@D)
+
+\tmv $(@D)/C00-Combined_combined.h5 $@
 """
 
-combine=r"""
-	${{SUMMARY_COMBINE_POSTERIORS}} \
-	--samples $@ \
-	--labels {labels} \
-	--outdir $(@D) \
-	--add_to_existing
-
-	${{SUMMARYMODIFY}} \
-	--samples $(@D)/C00-Combined-XO4a_combined.h5 \
-	--delimiter / \
-	--overwrite \
-	--labels {labels_join}_combined/C00:Mixed \
-	--webdir $(@D)
-
-	mv $(@D)/C00-Combined-XO4a_combined.h5 $@ 
-"""
-
-combine_xo4a=r"""
-	${{SUMMARY_COMBINE_POSTERIORS}} \
-	--samples $@ \
-	--labels {labels} \
-	--outdir $(@D) \
-	--add_to_existing
-
-	${{SUMMARYMODIFY}} \
-	--samples $(@D)/C00-Combined-XO4a_combined.h5 \
-	--delimiter / \
-	--overwrite \
-	--labels {labels_join}_combined/C00:Mixed+XO4a \
-	--webdir $(@D)
-
-	mv $(@D)/C00-Combined-XO4a_combined.h5 $@ 
-"""
+all_targets = []
 
 for name, event in events.items():
-    labels = []
-    waveforms = []
-    productions = {list(p.keys())[0]: list(p.values())[0] for p in event['productions']}
-    for production, settings in productions.items():
-        if (settings.get("review", None) is None) or (settings.get("review", None) is {}) or (len(settings['review'])>0 and settings['review'][-1]['status'].upper() != "REJECTED"):
-            if settings['pipeline'] == "bilby":
-                labels.append(production)
-                waveforms.append(settings['waveform']['approximant'])
-                    
+    productions = list(approved_bilby_productions(event))
+    if not productions:
+        continue
+
+    new_labels = []
+    for production, settings in productions:
+        approx = settings["waveform"]["approximant"]
+        new_labels.append(f"C00:{release_label(approx)}")
+
+    all_targets.append(f"releases/$(RELEASE)/{name}/C00-Combined.h5")
     print(recipe.format(event=name))
-    new_names = []
-    for label, waveform in zip(labels, waveforms):
-        if waveform == "IMRPhenomXPHM":
-            new_name = "C00:IMRPhenomXPHM-SpinTaylor"
-        else:
-            new_name = f"C00:{waveform}"
-        new_names.append(new_name)
-        print(rename.format(event=name, analysis=label, new_name=new_name))
-    if "IMRPhenomXO4a" in waveforms:
-        new_names_no_xo4a = new_names
-        new_names_no_xo4a.remove("C00:IMRPhenomXO4a")
-        print(combine.format(labels=" ".join(new_names), labels_join="_".join(new_names_no_xo4a)))
-    if "IMRPhenomXO4a" in waveforms:
-        print(combine_xo4a.format(labels=" ".join(new_names), labels_join="_".join(new_names)))
+    for (production, _), new_label in zip(productions, new_labels):
+        print(rename.format(production=production, new_label=new_label))
+
+    if len(new_labels) > 1:
+        print(combine.format(
+            labels=" ".join(new_labels),
+            labels_joined="_".join(new_labels),
+        ))
+
+if all_targets:
+    print(".PHONY: all_combined_release\n")
+    print("all_combined_release: " + " \\\n    ".join(all_targets) + "\n")

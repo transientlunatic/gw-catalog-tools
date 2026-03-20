@@ -1,21 +1,31 @@
 """
-This script takes an event name as an argument and prints a list of bilby analyses which are marked as "APPROVED" in the asimov project.
+List non-rejected bilby analyses for an event.
+
+Usage:
+    python asimov_not_rejected.py <event_name> [approximant]
+
+Prints the names of all non-rejected bilby productions for the given event,
+optionally filtered to a specific waveform approximant.
 """
-import yaml
 import sys
+sys.path.insert(0, "..")
+from scripts.ledger import load_ledger, get_events, not_rejected_bilby_productions
 
-with open(".asimov/ledger.yml", "r") as ledger_file:
-    data = yaml.safe_load(ledger_file)
-    
-events = {event['name']: event for event in data['events']}
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <event_name> [approximant]", file=sys.stderr)
+    sys.exit(1)
+
+data = load_ledger(".asimov/ledger.yml")
+events = get_events(data)
+
+if sys.argv[1] not in events:
+    print(f"Event '{sys.argv[1]}' not found in ledger.", file=sys.stderr)
+    sys.exit(1)
+
 event = events[sys.argv[1]]
-productions = {list(p.keys())[0]: list(p.values())[0] for p in event['productions']}
+approximant_filter = sys.argv[2] if len(sys.argv) > 2 else None
 
-for production, settings in productions.items():
-    if (settings.get("review", None) is not None) or (len(settings['review'])>0 and settings['review'][-1]['status'].upper() != "REJECTED"):
-        if len(sys.argv)==2:
-            if settings['pipeline'] == "bilby":
-                print(production, end=" ")
-        elif settings['pipeline'] == "bilby" and settings['waveform']['approximant'] == sys.argv[2]:
-            print(production, end=" ")
+for production, settings in not_rejected_bilby_productions(event):
+    if approximant_filter is None or settings["waveform"]["approximant"] == approximant_filter:
+        print(production, end=" ")
 print()

@@ -1,118 +1,55 @@
 """
-This script takes an event name as an argument and prints a list of bilby analyses which are marked as "APPROVED" in the asimov project.
+Stage 0: generate Makefile rules for combined review summary pages.
+
+For each event, produces a summarypages job across all non-rejected bilby
+analyses using cheap settings (no spin evolution) suitable for review.
+Output lands in ${WEB_PATH}/{event}/combined/ and is NOT used in any release.
+
+Run from the project directory:
+    python ../scripts/generate_combining_command.py > ../combined_summary.mk
 """
-import yaml
 import sys
+sys.path.insert(0, "..")
+from scripts.ledger import load_ledger, get_events, not_rejected_bilby_productions
 
-with open(".asimov/ledger.yml", "r") as ledger_file:
-    data = yaml.safe_load(ledger_file)
-    
-events = {event['name']: event for event in data['events']}
-
+data = load_ledger(".asimov/ledger.yml")
+events = get_events(data)
 
 recipe = """
-${{WEB_PATH}}/{event}/combined/samples/posterior_samples.h5: {samples}
-	cd project"""
+${{WEB_PATH}}/{event}/combined/samples/posterior_samples.h5: {samples}"""
+
 command = r"""	${{SUMMARYPAGES}} -w $(dir $@)../ \
---labels {labels}\
+--labels {labels} \
  -s $? \
  --multi_process 16 \
  --nsamples_for_skymap 2000 \
  --gw \
  --cosmology Planck15_lal \
  --redshift_method exact \
- --multi_threading_for_skymap 4 --nsamples_for_skymap 2000 \
- --calculate_multipole_snr --calculate_precessing_snr  --evolve_spins \
- --evolve_spins_forwards \
- --evolve_spins_backwards hybrid_orbit_averaged \
- --delta_f {delta_f} 
+ --multi_threading_for_skymap 4 \
+ --calculate_multipole_snr --calculate_precessing_snr \
+ --delta_f {delta_f}
 """
 
-for name, event in events.items():
-    productions = {list(p.keys())[0]: list(p.values())[0] for p in event['productions']}
+all_targets = []
 
+for name, event in events.items():
     labels = []
     samples = []
-    for production, settings in productions.items():
-        if (settings.get("review", None) is None) or len(settings['review'])==0 or (len(settings['review'])>0 and settings['review'][-1]['status'].upper() != "REJECTED"):
-                if settings['pipeline'] == "bilby":
-                    labels.append(production)
-                    samples.append(f"${{WEB_PATH}}/{name}/{production}/pesummary/samples/posterior_samples.h5")
-    delta_f = 1/event['likelihood']['psd length']
+    for production, settings in not_rejected_bilby_productions(event):
+        labels.append(production)
+        samples.append(
+            f"${{WEB_PATH}}/{name}/{production}/pesummary/samples/posterior_samples.h5"
+        )
+
+    if not labels:
+        continue
+
+    delta_f = 1 / event["likelihood"]["psd length"]
+    all_targets.append(f"${{WEB_PATH}}/{name}/combined/samples/posterior_samples.h5")
     print(recipe.format(event=name, samples=" ".join(samples)))
     print(command.format(labels=" ".join(labels), delta_f=delta_f))
 
-
-recipe = """
-releases/${{RELEASE}}/{event}/C00-Combined-XO4a.h5: ${{WEB_PATH}}/{event}/combined/samples/posterior_samples.h5
-	mkdir -p $(@D)
-	cp $< $@
-"""
-
-rename = r"""	${{SUMMARYMODIFY}} \
-	--samples $@ \
-	--delimiter _ \
-	--labels {analysis}_{new_name} \
-	--overwrite \
-	--webdir $(@D)
-"""
-
-combine=r"""
-	${{SUMMARY_COMBINE_POSTERIORS}} \
-	--samples $@ \
-	--labels {labels} \
-	--outdir $(@D) \
-	--add_to_existing
-
-	${{SUMMARYMODIFY}} \
-	--samples $(@D)/C00-Combined-XO4a_combined.h5 \
-	--delimiter / \
-	--overwrite \
-	--labels {labels_join}_combined/C00:Mixed \
-	--webdir $(@D)
-
-	mv $(@D)/C00-Combined-XO4a_combined.h5 $@ 
-"""
-
-combine_xo4a=r"""
-	${{SUMMARY_COMBINE_POSTERIORS}} \
-	--samples $@ \
-	--labels {labels} \
-	--outdir $(@D) \
-	--add_to_existing
-
-	${{SUMMARYMODIFY}} \
-	--samples $(@D)/C00-Combined-XO4a_combined.h5 \
-	--delimiter / \
-	--overwrite \
-	--labels {labels_join}_combined/C00:Mixed+XO4a \
-	--webdir $(@D)
-
-	mv $(@D)/C00-Combined-XO4a_combined.h5 $@ 
-"""
-
-for name, event in events.items():
-    labels = []
-    waveforms = []
-    productions = {list(p.keys())[0]: list(p.values())[0] for p in event['productions']}
-    for production, settings in productions.items():
-        if (settings.get("review", None) is None) or (settings.get("review", None) is {}) or (len(settings['review'])>0 and settings['review'][-1]['status'].upper() != "REJECTED"):
-            if settings['pipeline'] == "bilby":
-                labels.append(production)
-                waveforms.append(settings['waveform']['approximant'])
-                    
-    print(recipe.format(event=name))
-    new_names = []
-    for label, waveform in zip(labels, waveforms):
-        if waveform == "IMRPhenomXPHM":
-            new_name = "C00:IMRPhenomXPHM-SpinTaylor"
-        else:
-            new_name = f"C00:{waveform}"
-        new_names.append(new_name)
-        print(rename.format(event=name, analysis=label, new_name=new_name))
-    if "IMRPhenomXO4a" in waveforms:
-        new_names_no_xo4a = new_names
-        new_names_no_xo4a.remove("C00:IMRPhenomXO4a")
-        print(combine.format(labels=" ".join(new_names), labels_join="_".join(new_names_no_xo4a)))
-    if "IMRPhenomXO4a" in waveforms:
-        print(combine_xo4a.format(labels=" ".join(new_names), labels_join="_".join(new_names)))
+if all_targets:
+    print(".PHONY: all_review_pages\n")
+    print("all_review_pages: " + " \\\n    ".join(all_targets) + "\n")

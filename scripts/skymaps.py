@@ -1,61 +1,71 @@
-import yaml
-from gpstime import gpstime
-import h5py as hdf5
+"""
+Stage 2C: generate Makefile rules to produce skymaps for the full combined
+release.
 
+A skymap is generated for every waveform label present in the combined
+release HDF5 (including C00:Mixed). Rules are written to skymaps.mk.
+
+Run from the project directory (after the release HDF5 files exist):
+    python ../scripts/skymaps.py .asimov/ledger.yml
+"""
 import sys
+sys.path.insert(0, "..")
+from scripts.ledger import (
+    load_ledger, get_events, approved_bilby_productions, release_label
+)
 
-with open(sys.argv[1], "r") as datafile:
-    data = yaml.safe_load(datafile)
+if len(sys.argv) < 2:
+    print(f"Usage: {sys.argv[0]} <ledger.yml>", file=sys.stderr)
+    sys.exit(1)
 
-events = {event['name']: event for event in data['events']}
+data = load_ledger(sys.argv[1])
+events = get_events(data)
 
-def waveforms_for_event(event):
-
-    productions = {list(p.keys())[0]: list(p.values())[0] for p in events[event]['productions'] }
-    out = []
-    for production, settings in productions.items():
-        if len(settings['review'])>0:
-            if settings['review'][-1]['status'].upper() == "APPROVED" and settings['pipeline'] == "bilby":
-                out.append(settings['waveform']['approximant'])
-    return out
-
+all_skymap_targets = []
 
 with open("skymaps.mk", "w") as skymap_file:
 
-    events_in = []
-
-    events["S230518h"] = "GW230518_125908"
-    events["S230529ay"] = "GW230529_181500"
-    
     for name, event in events.items():
-
-        release_file = f"releases/staging/{name}/C00-Combined-XO4a.h5"
-
-        try:
-        
-           with hdf5.File(release_file) as datafile:
-               waveforms = list(datafile.keys())
-               waveforms.remove("history")
-               waveforms.remove("version")
-
-        except FileNotFoundError:
-            print(name)
+        productions = list(approved_bilby_productions(event))
+        if not productions:
             continue
-               
-        events_in += [name]
-        for waveform in waveforms:
-            waveform = waveform.replace("C00:", "")
-            skymap_file.write(f"releases/${{RELEASE}}/{name}/C00-{waveform.replace(':', '-')}.fits.gz: {release_file} \n")
-            skymap_file.write(f"\tmkdir -p releases/${{RELEASE}}/{name}/\n")
-            skymap_file.write(f"\tligo-skymap-from-samples $^ -j 32 --maxpts 2000 --outdir $(@D) --path 'C00:{waveform}/posterior_samples' --fitsoutname C00-{waveform.replace(':','-')}.fits.gz\n")
+
+        # The waveform labels that will be in the release HDF5, plus Mixed
+        waveform_labels = [
+            release_label(settings["waveform"]["approximant"])
+            for _, settings in productions
+        ]
+        if len(waveform_labels) > 1:
+            waveform_labels.append("Mixed")
+
+        release_file = f"releases/$(RELEASE)/{name}/C00-Combined.h5"
+        event_skymap_targets = []
+
+        for waveform in waveform_labels:
+            fits_name = f"C00-{waveform.replace(':', '-')}.fits.gz"
+            target = f"releases/$(RELEASE)/{name}/{fits_name}"
+            event_skymap_targets.append(target)
+            all_skymap_targets.append(target)
+
+            skymap_file.write(f"{target}: {release_file}\n")
+            skymap_file.write(f"\tmkdir -p $(@D)\n")
+            skymap_file.write(
+                f"\tligo-skymap-from-samples $^ -j 32 --maxpts 2000 "
+                f"--outdir $(@D) "
+                f"--path 'C00:{waveform}/posterior_samples' "
+                f"--fitsoutname {fits_name}\n"
+            )
             skymap_file.write("\n")
 
-        skymap_file.write(f"skymaps/{name}: ")
+        # Convenience phony target per event
+        skymap_file.write(f".PHONY: skymaps-{name}\n")
+        skymap_file.write(
+            f"skymaps-{name}: {' '.join(event_skymap_targets)}\n\n"
+        )
 
-        for waveform in waveforms:
-            waveform = waveform.replace("C00:", "")
-            skymap_file.write(f"releases/${{RELEASE}}/{name}/C00-{waveform.replace(':', '-')}.fits.gz ")
-        skymap_file.write("\n")
+    if all_skymap_targets:
+        skymap_file.write(".PHONY: all-skymaps\n")
+        skymap_file.write(
+            "all-skymaps: " + " \\\n    ".join(all_skymap_targets) + "\n"
+        )
 
-    skymap_file.write(f"all-skymaps: skymaps/{' skymaps/'.join(events_in)}\n")
-    skymap_file.write(".PHONY: all-skymaps\n")

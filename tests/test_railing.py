@@ -1,30 +1,10 @@
 from asimov.testing import AsimovTest
-import configparser
-from bilby_pipe import bilbyargparser
-import ast
 import os
-import glob
-import dill
-import h5py as h5
-import numpy as np
+import sys
 import peconfigurator.auxiliary.run_analyzer as configurator
 
-def open_pesummary_samples(metafile):
-    with h5.File(metafile) as metafile_h:
-        analyses = list(metafile_h.keys())
-        if "history" in analyses:
-            analyses.remove("history")
-        if "version" in analyses:
-            analyses.remove("version")
-
-        key = analyses[0]
-
-        posterior = np.array(metafile_h[key]['posterior_samples'])
-        prior = dict(metafile_h[key]['priors']['samples'])
-        prior = {name: np.array(data) for name, data in prior.items()}
-        #print(prior)
-        
-    return posterior, prior
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "scripts"))
+from ledger import open_pesummary_samples
 
 
 class TestBilbyAnalysesForRailing(AsimovTest):
@@ -45,7 +25,6 @@ class TestBilbyAnalysesForRailing(AsimovTest):
                                                              tolerance=2.0,
                                                              label="luminosity_distance")
                         self.assertFalse(railing_up, msg=f"Railing detected in luminosity distance at the upper bound; recommend this is adjusted to {_[1]}")
-                        #self.assertFalse(railing_down)
 
     def test_chirp_railing(self):
         """Check for railing in the chirp_mass posterior"""

@@ -1,9 +1,5 @@
 from asimov.testing import AsimovTest
-import configparser
 from bilby_pipe import bilbyargparser
-import ast
-#import bilbyargparser.BilbyConfigFileParser as bilby_parse
-import os
 
 class TestBilbyAnalyses(AsimovTest):
     def test_component_chirp_mass(self):
@@ -19,6 +15,4 @@ class TestBilbyAnalyses(AsimovTest):
                             config = parser.parse(filename)[0]
                             self.assertTrue("'PhenomXHMReleaseVersion': 122022" in config['waveform-arguments-dict'])
 
-                            
-if __name__ == '__main__':
-    unittest.main()
+

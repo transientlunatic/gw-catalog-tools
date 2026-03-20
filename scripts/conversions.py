@@ -1,5 +1,3 @@
-import numpy as np
-
 def chirp_mass_q_to_components(chirp_mass, mass_ratio):
 
     total = (chirp_mass) * (1 + mass_ratio)**1.2 / mass_ratio**0.6

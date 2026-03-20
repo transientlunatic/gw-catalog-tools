@@ -1,88 +1,99 @@
-import h5py as hdf5
+"""
+Add release skymaps to the CBCFlow metadata library.
+
+For each event, registers every skymap FITS file present in the release
+directory with CBCFlow.  Skips a waveform if the file does not exist on disk.
+
+Usage
+-----
+    python add-skymaps-to-cbcflow.py \\
+        --ledger project/.asimov/ledger.yml \\
+        --library /path/to/cbcflow-library \\
+        --version v4.0 \\
+        --release-dir releases/v4.0
+"""
+
 import os
-import cbcflow
 import sys
-import yaml
-from gpstime import gpstime
+import click
+import cbcflow
 
-with open("/home/pe.o4/GWTC4-fogg/project/.asimov/ledger.yml", "r") as datafile:
-    data = yaml.safe_load(datafile)
-
-events = {event['name']: gpstime.fromgps(int(event['event time'])).strftime("GW%y%m%d_%H%M%S") for event in data['events']}
-
-print(events)
-
-# events = ["S230601bf"]
-
-library = cbcflow.core.database.LocalLibraryDatabase("/home/pe.o4/GWTC4/cbcflow-library")
-
-# event = sys.argv[1]
-
-for event, phone in events.items():
-    release_file = f"/home/pe.o4/GWTC4-fogg/releases/v4.0/{event}/C00-Combined-XO4a.h5"
-
-    try:
-        with hdf5.File(release_file) as datafile:
-            waveforms = list(datafile.keys())
-            waveforms.remove("history")
-            waveforms.remove("version")
-    except Exception as e:
-        print(e)
-        print(release_file, event)
-        continue
-
-    for waveform in waveforms:
-
-        waveform = waveform.replace("C00:", "")
-        waveform = waveform.replace(":", "-")
-        
-        metadata = cbcflow.get_superevent(
-            event, library=library
-        )
-
-        output = {}
-        output["ParameterEstimation"] = {}
-        pe = output["ParameterEstimation"]["Results"] = []
+sys.path.insert(0, os.path.dirname(__file__))
+from ledger import load_ledger, get_events, approved_bilby_productions, release_label
 
 
-        metadata_pe_results = metadata["ParameterEstimation"]["Results"]
+@click.command()
+@click.option("--ledger", required=True, help="Path to the ledger.yml file")
+@click.option("--library", required=True, help="Path to the CBCFlow library")
+@click.option("--version", default="v1", show_default=True, help="Release version tag")
+@click.option("--release-dir", default=None,
+              help="Root directory of release files (default: releases/{version})")
+def add_skymaps(ledger, library, version, release_dir):
+    """Register skymap FITS files for all approved waveforms with CBCFlow."""
+    from gpstime import gpstime as _gpstime
+    import yaml
 
-        metadata_pe_results_uids = cbcflow.core.utils.get_uids_from_object_array(
-            metadata_pe_results
-        )
+    if release_dir is None:
+        release_dir = os.path.join("releases", version)
+
+    with open(ledger) as fh:
+        raw = yaml.safe_load(fh)
+
+    events = {
+        event["name"]: _gpstime.fromgps(int(event["event time"])).strftime("GW%y%m%d_%H%M%S")
+        for event in raw["events"]
+    }
+
+    all_events = get_events(load_ledger(ledger))
+    db = cbcflow.core.database.LocalLibraryDatabase(library)
+
+    for event_name, gw_name in events.items():
+        event = all_events[event_name]
+        waveform_labels = [
+            release_label(settings["waveform"]["approximant"])
+            for _, settings in approved_bilby_productions(event)
+        ]
+        # Include the Mixed posterior skymap if multiple waveforms were combined
+        if len(waveform_labels) > 1:
+            waveform_labels.append("Mixed")
+
+        for waveform in waveform_labels:
+            fits_name = f"C00-{waveform.replace(':', '-')}.fits.gz"
+            fits_path = os.path.join(release_dir, event_name, fits_name)
+
+            if not os.path.exists(fits_path):
+                click.echo(f"No skymap for {event_name} {waveform} — skipping.")
+                continue
+
+            uid = f"{version}-skymap-{waveform}"
+
+            try:
+                metadata = cbcflow.get_superevent(event_name, library=db)
+                pe_results = metadata["ParameterEstimation"]["Results"]
+                existing_uids = cbcflow.core.utils.get_uids_from_object_array(pe_results)
+
+                if uid in existing_uids:
+                    click.echo(f"{event_name} {uid} already in CBCFlow — skipping.")
+                    continue
+
+                output = {"ParameterEstimation": {"Results": []}}
+                entry = {
+                    "UID": uid,
+                    "InferenceSoftware": "PE Skymap Postprocessing",
+                    "Notes": [f"{version} skymap for C00:{waveform}"],
+                    "PESummaryResultFile": {"Path": os.path.abspath(fits_path)},
+                }
+                output["ParameterEstimation"]["Results"].append(entry)
+                metadata.update(output)
+                metadata.write_to_library(
+                    message=f"Adding {version} skymap for {waveform}",
+                    branch_name=f"add-{version}-skymap",
+                )
+                click.echo(f"Added {event_name} {uid} to CBCFlow.")
+
+            except Exception as exc:
+                click.echo(f"Error processing {event_name} {waveform}: {exc}")
 
 
-        analysis_output = {}
-        analysis_output["UID"] = f"v3-skymap-{waveform}"
-
-        if analysis_output["UID"] in metadata_pe_results_uids:
-            corresponding_analysis = metadata_pe_results[
-                metadata_pe_results_uids.index(analysis_output["UID"])
-            ]
-            continue
-        else:
-            corresponding_analysis = None
-
-        #analysis_output["InferenceSoftware"] = "PE Postprocessing"
-
-        analysis_output["Notes"] = []
-
-
-
-        analysis_output["Notes"].append(f"v3.0 Skymap for C00:{waveform}")
-        analysis_output["PESummaryResultFile"] = {}
-        analysis_output["PESummaryResultFile"]["Path"] = f"/home/pe.o4/GWTC4-fogg/releases/v4.0/{event}/C00-{waveform}.fits.gz"
-
-
-        if os.path.exists(analysis_output["PESummaryResultFile"]["Path"]):
-
-            pe.append(analysis_output)
-            metadata.update(output)
-
-
-            metadata.write_to_library(
-                message="Adding waveform to datarelease v3", branch_name="add-reweighted"
-            )
-
-        else:
-            print(f"No skymap for {event} {waveform}")
+if __name__ == "__main__":
+    add_skymaps()

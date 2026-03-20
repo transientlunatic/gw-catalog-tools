@@ -1,43 +1,58 @@
 """
-This script takes an event name as an argument and prints a list of bilby analyses which are marked as "APPROVED" in the asimov project.
+Generate an HTCondor submit file for Stage 0 (review combined summary pages).
+
+Each event gets its own job running:
+    make ${WEB_PATH}/{event}/combined/samples/posterior_samples.h5
+
+Run from the project directory:
+    python ../scripts/make_combining_submit_file.py > ../condor/review_summarypages.sub
+
+Pass an optional event name to generate a submit file for a single event:
+    python ../scripts/make_combining_submit_file.py S230601bf
 """
-import yaml
 import sys
+import os
+sys.path.insert(0, "..")
+from scripts.ledger import load_ledger, get_events, not_rejected_bilby_productions
 
-with open(".asimov/ledger.yml", "r") as ledger_file:
-    data = yaml.safe_load(ledger_file)
-    
-events = {event['name']: event for event in data['events']}
+data = load_ledger(".asimov/ledger.yml")
+events = get_events(data)
 
+makefile_path = os.environ.get("MAKEFILE_PATH", "/home/pe.o4/GWTC4-fogg/Makefile")
+web_path = os.environ.get("WEB_PATH", "/home/pe.o4/public_html/gwtc4-fogg")
+env = os.environ.get("ENV", "/home/pe.o4/GWTC4-fogg/environment")
+user = os.environ.get("USER", "pe.o4")
 
-description = """
-executable = /home/pe.o4/GWTC4-fogg/environment/bin/make
-arguments = -f /home/pe.o4/GWTC4-fogg/Makefile releases/staging/{event}/C00-Combined-XO4a.h5
+description = """\
+executable = {env}/bin/make
+arguments = -f {makefile} {web_path}/{event}/combined/samples/posterior_samples.h5
 request_disk = 20GB
-request_memory = 8192MB
+request_memory = 16384MB
 request_cpus = 16
 getenv = CONDA_EXE,USER,LAL*,PATH,HOME
-accounting_group_user = daniel.williams
+accounting_group_user = {user}
 accounting_group = ligo.prod.o4.cbc.pe.bilby
-log = postprocessing-submit/xo4a_combined_{event}.log
-output = postprocessing-submit/xo4a_combined_{event}.out
-error = postprocessing-submit/xo4a_combined_{event}.err
-batch_name = combined/{event}
+log = condor/review_summarypages_{event}.log
+output = condor/review_summarypages_{event}.out
+error = condor/review_summarypages_{event}.err
+batch_name = review-summarypages/{event}
 queue
+
 """
 
-if len(sys.argv) > 1:
-    event_name = sys.argv[1]
-else:
-    event_name = None
+filter_event = sys.argv[1] if len(sys.argv) > 1 else None
+
+os.makedirs("condor", exist_ok=True)
 
 for name, event in events.items():
-    if event_name and event_name != name: continue
-    # productions = {list(p.keys())[0]: list(p.values())[0] for p in event['productions']}
-    # for production, settings in productions.items():
-    #     if (settings.get("review", None) is not None) or (len(settings['review'])>0 and settings['review'][-1]['status'].upper() != "REJECTED"):
-    #             if settings['pipeline'] == "bilby":
-    #                 labels.append(production)
-    #                 samples.append(f"${{WEB_PATH}}/{name}/{production}/pesummary/samples/posterior_samples.h5")
-
-    print(description.format(event=name))
+    if filter_event and filter_event != name:
+        continue
+    if not list(not_rejected_bilby_productions(event)):
+        continue
+    print(description.format(
+        env=env,
+        makefile=makefile_path,
+        web_path=web_path,
+        event=name,
+        user=user,
+    ))
