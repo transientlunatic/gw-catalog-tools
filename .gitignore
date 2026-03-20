@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.egg-info/
+dist/
+build/
+.eggs/
+
+# Editor backup and swap files
+*.py~
+*~
+*.swp
+*.swo
+.#*
+\#*\#
+
+# Generated Makefile fragments
+combined_summary.mk
+release_summary.mk
+spintaylor_release.mk
+mixing_release.mk
+skymaps.mk
+
+# Condor submit files and logs
+condor/
+postprocessing-submit/
+*.log
+*.out
+*.err
+
+# Release output (large HDF5/FITS files, not for version control)
+release/
+releases/
+
+# Environment / virtualenv
+.env
+.venv
+env/
+
+# IDE
+.vscode/
+.idea/
+
+# Generated release reports
+releases/*/release_report.html
+releases/*/release_report.md
+
+# Project-specific event list (not committed — create locally)
+event_list.txt

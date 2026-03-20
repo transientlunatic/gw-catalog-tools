@@ -1,9 +1,5 @@
 from asimov.testing import AsimovTest
-import configparser
 from bilby_pipe import bilbyargparser
-import ast
-#import bilbyargparser.BilbyConfigFileParser as bilby_parse
-import os
 import glob
 import dill
 

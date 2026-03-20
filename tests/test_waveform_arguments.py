@@ -1,9 +1,5 @@
 from asimov.testing import AsimovTest
-import configparser
 from bilby_pipe import bilbyargparser
-import ast
-#import bilbyargparser.BilbyConfigFileParser as bilby_parse
-import os
 import glob
 
 
@@ -45,23 +41,5 @@ class TestBilbyAnalyses(AsimovTest):
                                     count = data.count("Ringdown frequency of (3,3) mode greater than maximum frequency from Nyquist theorem")
                                     if count > 0:
                                         print(event, count)
-                                    self.assertTrue(count < 5)                            
+                                    self.assertTrue(count < 5)
 
-    # def test_xo4q_env(self):
-    #     """Verify the environment used for the XO4a waveform is correct."""
-
-    #     for event in self.events:
-    #         for production in event.productions:
-    #             if (production.pipeline.name.lower() == "bilby") \
-    #                and (production.status_str.lower() == "uploaded") \
-    #                and ("IMRPhenomXO4a" in production.name)\
-    #                and (production.review.status == "APPROVED"):
-    #                 with self.subTest(event=event.name, production=production.name):
-    #                     # Read the config file
-    #                     parser = bilbyargparser.BilbyConfigFileParser()
-    #                     with open(f'{production.meta["working directory"]}/{production.name}/{production.name}_config_complete.ini', "r") as filename:
-    #                         config = parser.parse(filename)[0]
-    #                         self.assertTrue("/cvmfs/software.igwn.org/conda/envs/igwn-py310-20250129" in config['analysis-executable'])
-                        
-if __name__ == '__main__':
-    unittest.main()
