@@ -18,11 +18,17 @@ PYTHON=${ENV}/bin/python
 RELEASE=staging
 
 include combined_summary.mk
+include spintaylor_release.mk
 
 # Make the combined summarypages makefile
 combined_summary.mk: project/.asimov/ledger.yml
 	cd project
 	${PYTHON} ../scripts/generate_combining_command.py > ../$@
+
+# Make the spintaylor-only release makefile
+spintaylor_release.mk: project/.asimov/ledger.yml
+	cd project
+	${PYTHON} ../scripts/generate_spintaylor_release_command.py > ../$@
 
 # Make a submit file for all the combined pages
 condor/all_combined.sub: combined_summary.mk
@@ -39,6 +45,6 @@ tests:
 	cd project
 	${PYTHON} -m unittest discover tests
 
-makefiles: combined_summary.mk
+makefiles: combined_summary.mk spintaylor_release.mk
 
 .PHONY: tests makefiles
