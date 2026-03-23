@@ -77,23 +77,43 @@ def is_not_rejected(settings: dict) -> bool:
 # Convenience iterators
 # ---------------------------------------------------------------------------
 
-def approved_bilby_productions(event: dict):
+def get_default_inference_pipelines() -> list[str]:
     """
-    Yield ``(production_name, settings)`` for every APPROVED bilby production
+    Get the default list of inference pipelines to consider for release
+    summary pages.
+    """
+    return ["bilby", "rift", "dingo"]
+
+
+def approved_productions(event: dict, pipelines: list[str] | None = None):
+    """
+    Yield ``(production_name, settings)`` for every APPROVED production
     in *event*.
+
+    If ``pipelines`` is provided, only yield productions whose "pipeline" field
+    is in that list.  Otherwise, use the default list from
+    ``get_default_inference_pipelines()``.
     """
+    if pipelines is None:
+        pipelines = get_default_inference_pipelines()
     for name, settings in get_productions(event).items():
-        if settings.get("pipeline") == "bilby" and is_approved(settings):
+        if settings.get("pipeline") in pipelines and is_approved(settings):
             yield name, settings
 
 
-def not_rejected_bilby_productions(event: dict):
+def not_rejected_productions(event: dict, pipelines: list[str] | None = None):
     """
-    Yield ``(production_name, settings)`` for every non-rejected bilby
-    production in *event* (includes unreviewed).
+    Yield ``(production_name, settings)`` for every non-rejected production
+    in *event* (includes unreviewed).
+
+    If ``pipelines`` is provided, only yield productions whose "pipeline" field
+    is in that list.  Otherwise, use the default list from
+    ``get_default_inference_pipelines()``.
     """
+    if pipelines is None:
+        pipelines = get_default_inference_pipelines()
     for name, settings in get_productions(event).items():
-        if settings.get("pipeline") == "bilby" and is_not_rejected(settings):
+        if settings.get("pipeline") in pipelines and is_not_rejected(settings):
             yield name, settings
 
 

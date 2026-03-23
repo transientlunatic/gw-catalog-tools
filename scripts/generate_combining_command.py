@@ -10,7 +10,7 @@ Run from the project directory:
 """
 import sys
 sys.path.insert(0, "..")
-from scripts.ledger import load_ledger, get_events, not_rejected_bilby_productions
+from scripts.ledger import load_ledger, get_events, not_rejected_productions
 
 data = load_ledger(".asimov/ledger.yml")
 events = get_events(data)
@@ -36,7 +36,7 @@ all_targets = []
 for name, event in events.items():
     labels = []
     samples = []
-    for production, settings in not_rejected_bilby_productions(event):
+    for production, settings in not_rejected_productions(event):
         labels.append(production)
         samples.append(
             f"${{WEB_PATH}}/{name}/{production}/pesummary/samples/posterior_samples.h5"

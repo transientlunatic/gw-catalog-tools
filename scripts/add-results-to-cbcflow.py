@@ -28,7 +28,7 @@ import cbcflow
 import click
 
 sys.path.insert(0, os.path.dirname(__file__))
-from ledger import load_ledger, get_events, approved_bilby_productions, release_label
+from ledger import load_ledger, get_events, approved_productions, release_label
 
 
 def _waveform_labels_in_file(release_file):
@@ -44,7 +44,7 @@ def _get_approved_waveform_labels(event_name, ledger_path):
     events = get_events(data)
     return [
         release_label(settings["waveform"]["approximant"])
-        for _, settings in approved_bilby_productions(events[event_name])
+        for _, settings in approved_productions(events[event_name])
     ]
 
 

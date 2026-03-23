@@ -11,7 +11,7 @@ Run from the project directory (after the release HDF5 files exist):
 import sys
 sys.path.insert(0, "..")
 from scripts.ledger import (
-    load_ledger, get_events, approved_bilby_productions, release_label
+    load_ledger, get_events, approved_productions, release_label
 )
 
 if len(sys.argv) < 2:
@@ -26,7 +26,7 @@ all_skymap_targets = []
 with open("skymaps.mk", "w") as skymap_file:
 
     for name, event in events.items():
-        productions = list(approved_bilby_productions(event))
+        productions = list(approved_productions(event))
         if not productions:
             continue
 
