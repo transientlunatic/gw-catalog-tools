@@ -4,7 +4,7 @@ import matplotlib.pyplot as plt
 
 sys.path.insert(0, os.path.dirname(__file__))
 from ledger import (
-    load_ledger, get_events, approved_bilby_productions, open_pesummary_samples
+    load_ledger, get_events, approved_productions, open_pesummary_samples
 )
 
 if len(sys.argv) < 2:
@@ -27,7 +27,7 @@ def reviewed_productions_for_event(event_name, ledger_path):
     events = get_events(data)
     if event_name not in events:
         return []
-    return [p for p, _ in approved_bilby_productions(events[event_name])]
+    return [p for p, _ in approved_productions(events[event_name])]
 
 
 metafiles = [

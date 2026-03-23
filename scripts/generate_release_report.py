@@ -20,7 +20,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(__file__))
 from ledger import (
-    load_ledger, get_events, approved_bilby_productions, release_label,
+    load_ledger, get_events, approved_productions, release_label,
 )
 
 import h5py
@@ -61,7 +61,7 @@ def _expected_labels(productions):
 # ---------------------------------------------------------------------------
 
 def collect_event_info(event_name, event, release_dir):
-    productions = list(approved_bilby_productions(event))
+    productions = list(approved_productions(event))
     if not productions:
         return None
 

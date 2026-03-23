@@ -16,7 +16,7 @@ Run from the project directory:
 """
 import sys
 sys.path.insert(0, "..")
-from scripts.ledger import load_ledger, get_events, approved_bilby_productions
+from scripts.ledger import load_ledger, get_events, approved_productions
 
 data = load_ledger(".asimov/ledger.yml")
 events = get_events(data)
@@ -39,7 +39,7 @@ all_targets = []
 for name, event in events.items():
     approved = [
         production
-        for production, settings in approved_bilby_productions(event)
+        for production, settings in approved_productions(event)
         if settings["waveform"]["approximant"] == "IMRPhenomXPHM"
     ]
 

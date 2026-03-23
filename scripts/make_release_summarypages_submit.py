@@ -15,7 +15,7 @@ Pass an optional event name to generate a submit file for a single event:
 import sys
 import os
 sys.path.insert(0, "..")
-from scripts.ledger import load_ledger, get_events, approved_bilby_productions
+from scripts.ledger import load_ledger, get_events, approved_productions
 
 data = load_ledger(".asimov/ledger.yml")
 events = get_events(data)
@@ -51,7 +51,7 @@ os.makedirs("condor", exist_ok=True)
 for name, event in events.items():
     if filter_event and filter_event != name:
         continue
-    if not list(approved_bilby_productions(event)):
+    if not list(approved_productions(event)):
         continue
     print(description.format(
         env=env,

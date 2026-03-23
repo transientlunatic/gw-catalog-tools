@@ -19,7 +19,7 @@ import click
 import cbcflow
 
 sys.path.insert(0, os.path.dirname(__file__))
-from ledger import load_ledger, get_events, approved_bilby_productions, release_label
+from ledger import load_ledger, get_events, approved_productions, release_label
 
 
 @click.command()
@@ -51,7 +51,7 @@ def add_skymaps(ledger, library, version, release_dir):
         event = all_events[event_name]
         waveform_labels = [
             release_label(settings["waveform"]["approximant"])
-            for _, settings in approved_bilby_productions(event)
+            for _, settings in approved_productions(event)
         ]
         # Include the Mixed posterior skymap if multiple waveforms were combined
         if len(waveform_labels) > 1:

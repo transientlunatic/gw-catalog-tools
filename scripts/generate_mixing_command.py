@@ -15,7 +15,7 @@ Run from the project directory:
 import sys
 sys.path.insert(0, "..")
 from scripts.ledger import (
-    load_ledger, get_events, approved_bilby_productions, release_label
+    load_ledger, get_events, approved_productions, release_label
 )
 
 data = load_ledger(".asimov/ledger.yml")
@@ -55,7 +55,7 @@ combine = """\t${{SUMMARY_COMBINE_POSTERIORS}} \\
 all_targets = []
 
 for name, event in events.items():
-    productions = list(approved_bilby_productions(event))
+    productions = list(approved_productions(event))
     if not productions:
         continue
 

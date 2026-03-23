@@ -9,7 +9,7 @@ optionally filtered to a specific waveform approximant.
 """
 import sys
 sys.path.insert(0, "..")
-from scripts.ledger import load_ledger, get_events, not_rejected_bilby_productions
+from scripts.ledger import load_ledger, get_events, not_rejected_productions
 
 if len(sys.argv) < 2:
     print(f"Usage: {sys.argv[0]} <event_name> [approximant]", file=sys.stderr)
@@ -25,7 +25,7 @@ if sys.argv[1] not in events:
 event = events[sys.argv[1]]
 approximant_filter = sys.argv[2] if len(sys.argv) > 2 else None
 
-for production, settings in not_rejected_bilby_productions(event):
+for production, settings in not_rejected_productions(event):
     if approximant_filter is None or settings["waveform"]["approximant"] == approximant_filter:
         print(production, end=" ")
 print()
