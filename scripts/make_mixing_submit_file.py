@@ -24,10 +24,10 @@ events = get_events(data)
 makefile_path = os.environ.get("MAKEFILE_PATH", "/home/pe.o4/GWTC4-fogg/Makefile")
 release = os.environ.get("RELEASE", "staging")
 env = os.environ.get("ENV", "/home/pe.o4/GWTC4-fogg/environment")
-user = os.environ.get("USER", "pe.o4")
+user = os.environ.get("ACCOUNTING_USER") or os.environ.get("USER", "pe.o4")
 
 description = """\
-executable = {env}/bin/make
+executable = /usr/bin/make
 arguments = -f {makefile} releases/{release}/{event}/C00-Combined.h5
 request_disk = 20GB
 request_memory = 8192MB

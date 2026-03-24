@@ -45,7 +45,7 @@ for name, event in events.items():
     if not labels:
         continue
 
-    delta_f = 1 / event["likelihood"]["psd length"]
+    delta_f = 1 / event["data"]["segment length"]
     all_targets.append(f"${{WEB_PATH}}/{name}/combined/samples/posterior_samples.h5")
     print(recipe.format(event=name, samples=" ".join(samples)))
     print(command.format(labels=" ".join(labels), delta_f=delta_f))

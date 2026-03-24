@@ -2,10 +2,13 @@
 Stage 1: generate Makefile rules for the MVP (SpinTaylor-only) release.
 
 For each event with exactly one APPROVED bilby IMRPhenomXPHM production,
-a rule is emitted to copy the individual pesummary file into the release
-directory and rename the internal label to 'C00:IMRPhenomXPHM-SpinTaylor'.
-The skymap is already co-located in the pesummary directory and does not
-need to be regenerated.
+a rule is emitted to copy the PESummary metafile into the release directory
+and rename the internal label to 'C00:IMRPhenomXPHM-SpinTaylor'.
+
+The source file (${WEB_PATH}/{event}/{production}/pesummary/samples/posterior_samples.h5)
+must already be a PESummary metafile — i.e. the summarypages job must have
+completed for that production.  Events where summarypages has not yet run
+will fail at the summarymodify step; run summarypages first.
 
 If an event has more than one qualifying production a warning is issued
 to stderr and no rule is emitted for that event.  Unreviewed productions
@@ -13,6 +16,9 @@ are never included.
 
 Run from the project directory:
     python ../scripts/generate_spintaylor_release_command.py > ../spintaylor_release.mk
+
+Stage 1 files land under releases/$(RELEASE)/spintaylor/ to avoid any
+conflict with the Stage 2B combined release at releases/$(RELEASE)/.
 """
 import sys
 sys.path.insert(0, "..")
@@ -22,16 +28,11 @@ data = load_ledger(".asimov/ledger.yml")
 events = get_events(data)
 
 recipe = """
-releases/${{RELEASE}}/{event}/C00-Combined.h5: ${{WEB_PATH}}/{event}/{production}/pesummary/samples/posterior_samples.h5
+releases/${{RELEASE}}/spintaylor/{event}/C00-Combined.h5: ${{WEB_PATH}}/{event}/{production}/pesummary/samples/posterior_samples.h5
 \tmkdir -p $(@D)
-\tcp $< $@"""
-
-rename = """\t${{SUMMARYMODIFY}} \\
-\t--samples $@ \\
-\t--delimiter _ \\
-\t--labels {production}_C00:IMRPhenomXPHM-SpinTaylor \\
-\t--overwrite \\
-\t--webdir $(@D)
+\tcp $< $@.tmp.h5
+\t${{SUMMARYMODIFY}} --samples $@.tmp.h5 --delimiter _ --labels {production}_C00:IMRPhenomXPHM-SpinTaylor --overwrite --webdir /tmp
+\tmv $@.tmp.h5 $@
 """
 
 all_targets = []
@@ -54,9 +55,8 @@ for name, event in events.items():
         continue
 
     production = approved[0]
-    all_targets.append(f"releases/$(RELEASE)/{name}/C00-Combined.h5")
+    all_targets.append(f"releases/$(RELEASE)/spintaylor/{name}/C00-Combined.h5")
     print(recipe.format(event=name, production=production))
-    print(rename.format(production=production))
 
 if all_targets:
     print(".PHONY: all_spintaylor\n")
