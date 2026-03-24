@@ -59,12 +59,15 @@ def release():
 @click.option("--event", required=True, help="Event name (e.g. S230601bf)")
 @click.option("--filename", default="C00-Combined.h5", show_default=True,
               help="Release HDF5 filename")
+@click.option("--release-dir", default=None,
+              help="Base release directory (default: releases/{version})")
 @click.option("--extras", default=None,
               help="Comma-separated extra labels expected in the file (e.g. Mixed)")
-def check_waveforms(event, ledger, version, filename, extras):
+def check_waveforms(event, ledger, version, filename, release_dir, extras):
     """Check that all approved waveforms are present in the release file."""
     ledger_waveforms = _get_approved_waveform_labels(event, ledger)
-    release_file = os.path.join("releases", version, event, filename)
+    base = release_dir if release_dir else os.path.join("releases", version)
+    release_file = os.path.join(base, event, filename)
 
     try:
         file_waveforms = _waveform_labels_in_file(release_file)
@@ -118,33 +121,57 @@ def rename_mixed(filename):
 @click.option("--version", default="v1", show_default=True, help="Release version tag")
 @click.option("--filename", default="C00-Combined.h5", show_default=True,
               help="Release HDF5 filename")
-def add_datafile(ledger, library, version, filename):
-    """Register the combined release HDF5 with CBCFlow for all events."""
+@click.option("--release-dir", default=None,
+              help="Base release directory (default: releases/{version})")
+@click.option("--event", default=None,
+              help="Process only this event (default: all events in ledger)")
+@click.option("--spintaylor", is_flag=True, default=False,
+              help="Stage 1 SpinTaylor-only release: skip ledger waveform validation")
+def add_datafile(ledger, library, version, filename, release_dir, event, spintaylor):
+    """Register the combined release HDF5 with CBCFlow for all events (or a single --event)."""
     from gpstime import gpstime as _gpstime
     import yaml
+
+    base = release_dir if release_dir else os.path.join("releases", version)
 
     with open(ledger) as fh:
         data = yaml.safe_load(fh)
 
     events = {
-        event["name"]: _gpstime.fromgps(int(event["event time"])).strftime("GW%y%m%d_%H%M%S")
-        for event in data["events"]
+        e["name"]: _gpstime.fromgps(int(e["event time"])).strftime("GW%y%m%d_%H%M%S")
+        for e in data["events"]
+        if event is None or e["name"] == event
     }
+
+    if event is not None and event not in events:
+        raise click.ClickException(f"Event '{event}' not found in ledger.")
 
     db = cbcflow.core.database.LocalLibraryDatabase(library)
 
     for event_name, gw_name in events.items():
-        release_file = os.path.join("releases", version, event_name, filename)
+        release_file = os.path.join(base, event_name, filename)
 
-        # Validate before touching CBCFlow
-        try:
-            check_waveforms.callback(
-                event=event_name, ledger=ledger, version=version,
-                filename=filename, extras="Mixed",
-            )
-        except SystemExit:
-            click.echo(f"Skipping {event_name}: waveform validation failed.")
-            continue
+        # Validate before touching CBCFlow.
+        # For the spintaylor release the file only has IMRPhenomXPHM-SpinTaylor
+        # regardless of how many waveforms the ledger knows about, so the
+        # ledger-based check doesn't apply — skip it and just confirm the file
+        # is present.
+        if spintaylor:
+            if not os.path.isfile(release_file):
+                click.echo(f"Skipping {event_name}: {release_file} not found.")
+                continue
+        else:
+            # Only expect Mixed when there is more than one approved waveform.
+            approved = _get_approved_waveform_labels(event_name, ledger)
+            extras_val = "Mixed" if len(approved) > 1 else None
+            try:
+                check_waveforms.callback(
+                    event=event_name, ledger=ledger, version=version,
+                    filename=filename, release_dir=base, extras=extras_val,
+                )
+            except SystemExit:
+                click.echo(f"Skipping {event_name}: waveform validation failed.")
+                continue
 
         try:
             metadata = cbcflow.get_superevent(event_name, library=db)

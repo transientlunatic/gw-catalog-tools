@@ -126,19 +126,45 @@ condor_submit condor/review_summarypages.sub
 
 ### Stage 1 — MVP release (IMRPhenomXPHM-SpinTaylor only)
 
-Copies the individual APPROVED pesummary file for each event into the release directory and renames the internal label to `C00:IMRPhenomXPHM-SpinTaylor`. The skymap is already present alongside the pesummary file and requires no regeneration. Only analyses with an explicit **APPROVED** review status are included; if an event has more than one qualifying analysis a warning is printed and it is skipped.
+Copies the individual APPROVED pesummary file for each event into the release
+directory and renames the internal label to `C00:IMRPhenomXPHM-SpinTaylor`.
+The skymap is already present alongside the pesummary file and requires no
+regeneration. Only analyses with an explicit **APPROVED** review status are
+included; if an event has more than one qualifying analysis a warning is printed
+and it is skipped.
+
+Output lands under `releases/$(RELEASE)/spintaylor/` to keep it separate from
+the Stage 2B combined release at `releases/$(RELEASE)/`. This avoids Makefile
+target conflicts when both sub-makefiles are loaded simultaneously.
 
 ```bash
 make spintaylor_release.mk            # regenerate Stage 1 rules from ledger
-make all_spintaylor RELEASE=v4.0
+make all_spintaylor RELEASE=v4.0      # files → releases/v4.0/spintaylor/{event}/C00-Combined.h5
 ```
 
 Once you have verified the output, submit to CBCFlow manually:
 
 ```bash
-python scripts/add-results-to-cbcflow.py release waveforms \
+# Check waveforms are present (dry run):
+python scripts/add-results-to-cbcflow.py waveforms \
     --ledger project/.asimov/ledger.yml \
+    --release-dir releases/v4.0/spintaylor \
     --event S230601bf \
+    --version v4.0
+
+# Register files with CBCFlow:
+python scripts/add-results-to-cbcflow.py add_datafile \
+    --ledger project/.asimov/ledger.yml \
+    --library project/cbcflow-library \
+    --release-dir releases/v4.0/spintaylor \
+    --version v4.0 \
+    --spintaylor
+
+# Register skymaps with CBCFlow:
+python scripts/add-skymaps-to-cbcflow.py \
+    --ledger project/.asimov/ledger.yml \
+    --library project/cbcflow-library \
+    --release-dir releases/v4.0/spintaylor \
     --version v4.0
 ```
 
@@ -175,17 +201,44 @@ make all-skymaps RELEASE=v4.0
 make skymaps-S230601bf RELEASE=v4.0
 ```
 
+`skymaps.mk` also contains rules for the Stage 1 SpinTaylor-only release
+(one skymap per event, `C00-IMRPhenomXPHM-SpinTaylor.fits.gz`, under
+`releases/$(RELEASE)/spintaylor/{event}/`):
+
+```bash
+make all-spintaylor-skymaps RELEASE=v4.0
+# or per-event:
+make spintaylor-skymap-S230601bf RELEASE=v4.0
+```
+
 Once you have verified the full combined release, submit to CBCFlow manually:
 
 ```bash
-python scripts/add-results-to-cbcflow.py release waveforms \
+# Check waveforms are present (dry run):
+python scripts/add-results-to-cbcflow.py waveforms \
     --ledger project/.asimov/ledger.yml \
     --event S230601bf \
-    --version v4.0 \
-    --filename C00-Combined.h5
+    --version v4.0
+
+# Register files with CBCFlow:
+python scripts/add-results-to-cbcflow.py add_datafile \
+    --ledger project/.asimov/ledger.yml \
+    --library project/cbcflow-library \
+    --version v4.0
+
+# Register skymaps with CBCFlow:
+python scripts/add-skymaps-to-cbcflow.py \
+    --ledger project/.asimov/ledger.yml \
+    --library project/cbcflow-library \
+    --version v4.0
 ```
 
 ## Regenerating all sub-makefiles at once
+
+The sub-makefiles (`combined_summary.mk`, `spintaylor_release.mk`, etc.) are
+generated from the ledger and are only rebuilt automatically when the ledger is
+**newer** than the existing `.mk` file. After pulling changes to the generator
+scripts, always force a full regeneration before running a release build:
 
 ```bash
 make makefiles
@@ -224,6 +277,10 @@ This runs `tests/test_release_files.py`, which checks for each APPROVED event:
 - Each label contains at least one posterior sample
 - Each expected `C00-{Waveform}.fits.gz` skymap exists and is non-empty
 
+If `releases/{RELEASE}/spintaylor/` exists it is checked automatically as well:
+each event's `C00-Combined.h5` must exist and contain the
+`C00:IMRPhenomXPHM-SpinTaylor` label with at least one sample.
+
 Exits with code 0 on success and 1 on any failure.
 
 ## Release report
@@ -244,5 +301,8 @@ release directory:
 - `release_report.md` — the same information in GitHub-Flavoured Markdown,
   including a `sha256sums`-format block and per-event detail sections
   with skymap hashes, ready to be copied into an MR description
+
+If `releases/{RELEASE}/spintaylor/` exists, both files automatically include a
+**Stage 1 — SpinTaylor-only release** section covering that tree.
 
 Both files are `.gitignore`d, as they are generated artefacts.

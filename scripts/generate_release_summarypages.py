@@ -53,7 +53,7 @@ for name, event in events.items():
         f"${{WEB_PATH}}/{name}/{p}/pesummary/samples/posterior_samples.h5"
         for p, _ in productions
     ]
-    delta_f = 1 / event["likelihood"]["psd length"]
+    delta_f = 1 / event["data"]["segment length"]
 
     all_targets.append(
         f"${{WEB_PATH}}/{name}/combined-release/samples/posterior_samples.h5"

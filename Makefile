@@ -19,6 +19,7 @@ ASIMOV                    = ${ENV}/bin/asimov
 SUMMARYPAGES              = ${ENV}/bin/summarypages
 SUMMARY_COMBINE_POSTERIORS= ${ENV}/bin/summarycombine_posteriors
 SUMMARYMODIFY             = ${ENV}/bin/summarymodify
+LIGO_SKYMAP               = ${ENV}/bin/ligo-skymap-from-samples
 PYTHON                    = ${ENV}/bin/python
 
 export ENV WEB_PATH RELEASE PROJECT MAKEFILE_PATH ACCOUNTING_USER
@@ -129,7 +130,7 @@ condor/mixing_release.sub: $(PROJECT)/.asimov/ledger.yml
 # ---------------------------------------------------------------------------
 skymaps.mk: $(PROJECT)/.asimov/ledger.yml
 	cd $(PROJECT)
-	${PYTHON} ../scripts/skymaps.py .asimov/ledger.yml
+	${PYTHON} ../scripts/skymaps.py .asimov/ledger.yml > ../$@
 
 # ---------------------------------------------------------------------------
 # Convenience targets

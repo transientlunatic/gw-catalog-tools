@@ -21,10 +21,10 @@ events = get_events(data)
 makefile_path = os.environ.get("MAKEFILE_PATH", "/home/pe.o4/GWTC4-fogg/Makefile")
 web_path = os.environ.get("WEB_PATH", "/home/pe.o4/public_html/gwtc4-fogg")
 env = os.environ.get("ENV", "/home/pe.o4/GWTC4-fogg/environment")
-user = os.environ.get("USER", "pe.o4")
+user = os.environ.get("ACCOUNTING_USER") or os.environ.get("USER", "pe.o4")
 
 description = """\
-executable = {env}/bin/make
+executable = /usr/bin/make
 arguments = -f {makefile} {web_path}/{event}/combined/samples/posterior_samples.h5
 request_disk = 20GB
 request_memory = 16384MB
