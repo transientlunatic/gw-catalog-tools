@@ -39,10 +39,10 @@ all_spintaylor_skymap_targets = []
 # ------------------------------------------------------------------
 # Stage 2B: full combined release
 # ------------------------------------------------------------------
-    for name, event in events.items():
-        productions = list(approved_productions(event))
-        if not productions:
-            continue
+for name, event in events.items():
+    productions = list(approved_productions(event))
+    if not productions:
+        continue
     # The waveform labels that will be in the release HDF5, plus Mixed
     waveform_labels = [
         release_label(settings["waveform"]["approximant"])
