@@ -25,7 +25,7 @@ user = os.environ.get("ACCOUNTING_USER") or os.environ.get("USER", "pe.o4")
 
 description = """\
 executable = /usr/bin/make
-arguments = -f {makefile} {web_path}/{event}/combined/samples/posterior_samples.h5
+arguments = -f {makefile} WEB_PATH={web_path} ENV={env} {web_path}/{event}/combined/samples/posterior_samples.h5
 request_disk = 20GB
 request_memory = 16384MB
 request_cpus = 16
