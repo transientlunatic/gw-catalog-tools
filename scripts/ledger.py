@@ -59,7 +59,7 @@ def is_approved(settings: dict) -> bool:
     Unreviewed productions always return False.
     """
     review = settings.get("review") or []
-    return len(review) > 0 and review[-1]["status"].upper() == "APPROVED"
+    return len(review) > 0 and (review[-1]["status"] or "").upper() == "APPROVED"
 
 
 def is_not_rejected(settings: dict) -> bool:
@@ -70,7 +70,7 @@ def is_not_rejected(settings: dict) -> bool:
     review = settings.get("review") or []
     if len(review) == 0:
         return True
-    return review[-1]["status"].upper() != "REJECTED"
+    return (review[-1]["status"] or "").upper() != "REJECTED"
 
 
 # ---------------------------------------------------------------------------
