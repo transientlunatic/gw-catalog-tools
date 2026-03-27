@@ -89,4 +89,5 @@ for name, event in events.items():
         event=name,
         release=release,
         user=user,
+        condor_env=condor_env,
     ))
