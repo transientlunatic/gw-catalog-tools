@@ -9,11 +9,13 @@ ENV             ?= /home/pe.o4/GWTC4-fogg/environment
 WEB_PATH        ?= /home/pe.o4/public_html/gwtc4-fogg
 RELEASE         ?= staging
 PROJECT         ?= project
-ACCOUNTING_USER ?=
+ACCOUNTING_USER ?= daniel.williams
+NCPUS           ?= 16
+NCPUS           := $(or $(NCPUS),16)
 # Directory that contains per-analysis blueprint YAML files applied by add-event
 BLUEPRINTS_DIR  ?= blueprints/analyses
 
-MAKEFILE_PATH ?= $(abspath $(lastword $(MAKEFILE_LIST)))
+MAKEFILE_PATH := $(or $(MAKEFILE_PATH),$(abspath $(lastword $(MAKEFILE_LIST))))
 
 ASIMOV                    = ${ENV}/bin/asimov
 SUMMARYPAGES              = ${ENV}/bin/summarypages
@@ -22,7 +24,7 @@ SUMMARYMODIFY             = ${ENV}/bin/summarymodify
 LIGO_SKYMAP               = ${ENV}/bin/ligo-skymap-from-samples
 PYTHON                    = ${ENV}/bin/python
 
-export ENV WEB_PATH RELEASE PROJECT MAKEFILE_PATH ACCOUNTING_USER
+export ENV WEB_PATH RELEASE PROJECT MAKEFILE_PATH ACCOUNTING_USER NCPUS FORCE
 
 # ---------------------------------------------------------------------------
 # Generated sub-makefiles

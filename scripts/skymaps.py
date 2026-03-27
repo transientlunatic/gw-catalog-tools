@@ -87,7 +87,7 @@ if all_skymap_targets:
 for name, event in events.items():
     qualifying = [
         production
-        for production, settings in approved_bilby_productions(event)
+        for production, settings in approved_productions(event, pipelines=["bilby"])
         if settings["waveform"]["approximant"] == "IMRPhenomXPHM"
     ]
     if len(qualifying) != 1:
