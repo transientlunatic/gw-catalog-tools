@@ -84,4 +84,5 @@ for name, event in events.items():
         web_path=web_path,
         event=name,
         user=user,
+        condor_env=condor_env,
     ))
