@@ -42,6 +42,7 @@ user = os.environ.get("ACCOUNTING_USER") or os.environ.get("USER", "pe.o4")
 force = os.environ.get("FORCE", "").strip() in ("1", "true", "yes")
 force_flag = "-B " if force else ""
 ncpus = int(os.environ.get("NCPUS", 16))
+condor_env = os.environ.get("CONDOR_ENV", "OMP_NUM_THREADS=1 OMP_PROC_BIND=False")
 
 description = """\
 NCPUS = {ncpus}
@@ -58,6 +59,7 @@ log = condor/review_summarypages_{event}.log
 output = condor/review_summarypages_{event}.out
 error = condor/review_summarypages_{event}.err
 batch_name = review-summarypages/{event}
+environment = {condor_env}
 queue
 
 """
