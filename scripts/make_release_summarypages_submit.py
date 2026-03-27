@@ -40,6 +40,7 @@ events = get_events(data)
 project_dir = os.path.dirname(os.getcwd())
 web_path = os.environ.get("WEB_PATH", "/home/pe.o4/public_html/gwtc4-fogg")
 release = os.environ.get("RELEASE", "staging")
+condor_env = os.environ.get("CONDOR_ENV", "OMP_NUM_THREADS=1 OMP_PROC_BIND=False")
 
 description = """\
 NCPUS = {ncpus}
@@ -56,6 +57,7 @@ log = condor/release_summarypages_{event}.log
 output = condor/release_summarypages_{event}.out
 error = condor/release_summarypages_{event}.err
 batch_name = release-summarypages/{event}
+environment = {condor_env}
 queue
 
 """

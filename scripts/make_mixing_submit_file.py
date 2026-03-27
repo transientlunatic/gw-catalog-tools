@@ -25,6 +25,7 @@ makefile_path = os.environ.get("MAKEFILE_PATH", "/home/pe.o4/GWTC4-fogg/Makefile
 release = os.environ.get("RELEASE", "staging")
 env = os.environ.get("ENV", "/home/pe.o4/GWTC4-fogg/environment")
 user = os.environ.get("ACCOUNTING_USER") or os.environ.get("USER", "pe.o4")
+condor_env = os.environ.get("CONDOR_ENV", "OMP_NUM_THREADS=1 OMP_PROC_BIND=False")
 
 description = """\
 executable = /usr/bin/make
@@ -39,6 +40,7 @@ log = condor/mixing_{event}.log
 output = condor/mixing_{event}.out
 error = condor/mixing_{event}.err
 batch_name = mixing/{event}
+environment = {condor_env}
 queue
 
 """
