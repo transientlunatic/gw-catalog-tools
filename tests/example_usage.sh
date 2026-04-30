@@ -2,22 +2,28 @@
 # Example usage of automated PE review tests
 # This script demonstrates how to run the tests in different modes
 
+SCRIPT="python3 test_automated_review_standalone.py"
+
 echo "=========================================="
 echo "Automated PE Review Tests - Usage Examples"
 echo "=========================================="
 echo ""
 
+# ---------------------------------------------------------------------------
+# Original single-file and framework modes
+# ---------------------------------------------------------------------------
+
 # Example 1: Run standalone test on a single file
 echo "Example 1: Test a single HDF5 file"
 echo "-----------------------------------"
 echo "Command:"
-echo "  python3 test_automated_review_standalone.py IGWN-GWTC3p0-v2-GW191215_223052_PEDataRelease_mixed_cosmo.h5"
+echo "  $SCRIPT run IGWN-GWTC3p0-v2-GW191215_223052_PEDataRelease_mixed_cosmo.h5"
 echo ""
 echo "This will:"
 echo "  - Load the posterior samples from the HDF5 file"
 echo "  - Run all automated review tests"
 echo "  - Print results to console"
-echo "  - Return exit code 0 (success) or 1 (failure)"
+echo "  - Write results to review.json (default output)"
 echo ""
 
 # Example 2: Run with pytest
@@ -68,13 +74,13 @@ echo "  - Access event and production metadata"
 echo "  - Generate reports in correct locations"
 echo ""
 
-# Example 6: Check multiple files in batch
-echo "Example 6: Batch testing multiple files"
-echo "---------------------------------------"
+# Example 6: Check multiple files in batch (shell loop)
+echo "Example 6: Batch testing multiple files (shell loop)"
+echo "-----------------------------------------------------"
 echo "Command:"
 echo "  for f in /path/to/events/*/*/pesummary/samples/posterior_samples.h5; do"
 echo "    echo \"Testing \$f\""
-echo "    python3 test_automated_review_standalone.py \"\$f\""
+echo "    $SCRIPT run \"\$f\""
 echo "  done"
 echo ""
 echo "This will:"
@@ -87,7 +93,7 @@ echo ""
 echo "Example 7: Save test output to file"
 echo "------------------------------------"
 echo "Command:"
-echo "  python3 test_automated_review_standalone.py sample.h5 > results.txt 2>&1"
+echo "  $SCRIPT run sample.h5 > results.txt 2>&1"
 echo ""
 echo "This will:"
 echo "  - Run tests and save output to results.txt"
@@ -95,6 +101,90 @@ echo "  - Include both stdout and stderr"
 echo "  - Useful for batch processing and record-keeping"
 echo ""
 
+# ---------------------------------------------------------------------------
+# Batch discovery modes (new)
+# ---------------------------------------------------------------------------
+
+echo "=========================================="
+echo "Batch discovery mode (auto-discover events)"
+echo "=========================================="
+echo ""
+
+# Example 8: Auto-discover all events under a root, one specific analysis
+echo "Example 8: Auto-discover all events, one specific analysis"
+echo "----------------------------------------------------------"
+echo "Command:"
+echo "  $SCRIPT run \\"
+echo "      --root /home/pe.o4/GWTC6/project/results \\"
+echo "      --analysis bilby-IMRPhenomXPHM-SpinTaylor \\"
+echo "      --output review.json"
+echo ""
+echo "This will:"
+echo "  - Walk root/{S-ID}/{analysis}/posterior_samples.h5"
+echo "  - Run all checks on each file found"
+echo "  - Save structured results to review.json"
+echo ""
+
+# Example 9: Auto-discover all events, all bilby analyses (glob)
+echo "Example 9: Auto-discover all events, all bilby analyses (glob)"
+echo "---------------------------------------------------------------"
+echo "Command:"
+echo "  $SCRIPT run \\"
+echo "      --root /home/pe.o4/GWTC6/project/results \\"
+echo "      --analysis 'bilby-*' \\"
+echo "      --output review.json"
+echo ""
+echo "This will:"
+echo "  - Match any analysis directory starting with 'bilby-'"
+echo "  - One JSON entry per (event, analysis) pair"
+echo ""
+
+# Example 10: Generate a markdown report from saved JSON
+echo "Example 10: Generate a markdown report from saved JSON"
+echo "-------------------------------------------------------"
+echo "Command:"
+echo "  $SCRIPT report review.json --output review.md"
+echo ""
+echo "Or print to stdout:"
+echo "  $SCRIPT report review.json"
+echo ""
+echo "This will:"
+echo "  - Read the JSON produced by 'run'"
+echo "  - Produce a markdown table: events as rows, tests as columns"
+echo "  - Add a Notes column with aggregated warnings/failures"
+echo ""
+
+# Example 11: Full pipeline — run then report
+echo "Example 11: Full pipeline — run then report"
+echo "--------------------------------------------"
+echo "Command:"
+echo "  $SCRIPT run \\"
+echo "      --root /home/pe.o4/GWTC6/project/results \\"
+echo "      --analysis 'bilby-*' \\"
+echo "      --output review.json"
+echo "  $SCRIPT report review.json --output review.md"
+echo ""
+
+echo "=========================================="
+echo "JSON structure (produced by 'run')"
+echo "=========================================="
+echo ""
+echo "  review.json"
+echo "  ├── meta: {generated, root, analysis_pattern}"
+echo "  └── events:"
+echo "      └── S250202cu:"
+echo "          └── bilby-IMRPhenomXPHM-SpinTaylor:"
+echo "              ├── file, timestamp, n_samples, load_error, overall_status"
+echo "              └── tests:"
+echo "                  ├── sample_count:      {status, notes}"
+echo "                  ├── spin_prior:        {status, notes}"
+echo "                  ├── multimodality:     {status, notes}"
+echo "                  ├── param_consistency: {status, notes}"
+echo "                  ├── log_evidence:      {status, notes}"
+echo "                  └── network_snr:       {status, notes}"
+echo ""
+echo "Possible status values: PASS | WARNING | FAIL | ERROR | N/A"
+echo ""
 echo "=========================================="
 echo "For more information, see README_AUTOMATED_REVIEW.md"
 echo "=========================================="
