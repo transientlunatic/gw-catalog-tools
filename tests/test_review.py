@@ -288,3 +288,31 @@ class TestCommandLine:
         assert "catalog_tools.asimov_tests" in (directory / "test_catalog_tools.py").read_text()
         assert cli.main(["install-tests", str(directory)]) == 1
         assert cli.main(["install-tests", str(directory), "--force"]) == 0
+
+
+class TestFindingSamples:
+    def test_candidates_are_in_order_of_preference(self):
+        paths = utils.metafile_candidates("GW1", "run-2", webroot="/web", project_root="/proj",
+                                          storage="results")
+        assert paths == [
+            "/web/GW1/run-2/pesummary/samples/posterior_samples.h5",
+            "results/GW1/run-2/posterior_samples.h5",
+            "/proj/results/GW1/run-2/posterior_samples.h5",
+        ]
+
+    def test_results_in_the_current_project_are_found_when_the_config_names_another_copy(
+            self, tmp_path, monkeypatch):
+        # The config says the project is at /elsewhere, but the analysis being
+        # tested is in the project in the current directory.
+        monkeypatch.chdir(tmp_path)
+        samples = tmp_path / "results" / "GW1" / "run-2" / "posterior_samples.h5"
+        samples.parent.mkdir(parents=True)
+        samples.write_text("")
+        monkeypatch.setattr(utils, "candidate_metafiles", lambda event, production: utils.metafile_candidates(
+            event, production, webroot="/nonexistent/web", project_root="/elsewhere", storage="results"))
+        assert utils.get_metafile_path("GW1", "run-2") == "results/GW1/run-2/posterior_samples.h5"
+
+    def test_the_first_candidate_is_reported_when_nothing_exists(self, monkeypatch):
+        monkeypatch.setattr(utils, "candidate_metafiles", lambda event, production: utils.metafile_candidates(
+            event, production, webroot="/nonexistent/web", project_root="/elsewhere", storage="results"))
+        assert utils.get_metafile_path("GW1", "run-2").startswith("/nonexistent/web/")

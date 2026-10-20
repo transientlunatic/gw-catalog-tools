@@ -80,28 +80,31 @@ class TestAutomatedReview(AsimovTest):
 
     def analyses_to_review(self, test_key):
         """
-        The (event, production, metafile) triples to be tested.
+        The (event, production, metafile) triples to be tested, and a list of
+        the analyses whose samples can't be found.
 
-        A SKIP is recorded for any analysis whose samples can't be found, and
-        the calling test is skipped if there is nothing to test at all, so
-        that a test which has checked nothing can't be mistaken for a pass.
+        An uploaded analysis which is awaiting review must have samples, so one
+        without is recorded as a FAIL and returned for the caller to fail on;
+        quietly skipping it would let a test pass without having tested the
+        analysis.  The calling test is skipped only if there is nothing to
+        review at all.
         """
-        todo = []
+        todo, missing = [], []
         for event in self.events:
             for production in event.productions:
                 if not should_review(production):
                     continue
                 metafile = get_metafile_path(event.name, production.name)
                 if not os.path.exists(metafile):
+                    message = f"samples not found (looked at {metafile})"
                     self.record_result(event.name, production.name, test_key, {
-                        "status": "SKIP",
-                        "message": f"Samples not found at {metafile}"
-                    })
+                        "status": "FAIL", "message": message[0].upper() + message[1:]})
+                    missing.append(f"{event.name} {production.name}: {message}")
                     continue
                 todo.append((event, production, metafile))
-        if not todo:
+        if not todo and not missing:
             self.skipTest("No analyses to review")
-        return todo
+        return todo, missing
 
     def run_check(self, test_key, check, blocking=False):
         """
@@ -115,8 +118,8 @@ class TestAutomatedReview(AsimovTest):
         Failures are collected and reported together, each with the event and
         analysis it belongs to, so that a failure is never ambiguous.
         """
-        failures = []
-        for event, production, metafile in self.analyses_to_review(test_key):
+        todo, failures = self.analyses_to_review(test_key)
+        for event, production, metafile in todo:
             label = f"{event.name} {production.name}"
             try:
                 posterior, prior = open_pesummary_samples(metafile)

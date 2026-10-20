@@ -83,29 +83,46 @@ def should_review(production):
 # Locating and reading results
 # ---------------------------------------------------------------------------
 
-def candidate_metafiles(event_name, production_name):
-    """Places where an analysis' PESummary samples file might be, in order."""
-    from asimov import config
+def metafile_candidates(event_name, production_name, webroot, project_root, storage):
+    """
+    Where an analysis' PESummary samples file might be, in order of preference:
 
-    webroot = config.get("general", "webroot")
-    project_root = config.get("project", "root", fallback="")
-    storage = config.get("storage", "directory", fallback="results")
+    1. in the web root, where PESummary writes it;
+    2. in the results store of the project in the current directory;
+    3. in the results store of the project which the config names.
 
+    The second is tried before the third because a project's config can name a
+    different copy of the project (an asimov project can be moved or copied
+    while its config still holds the old absolute paths), and the analyses of
+    the project being tested are in the current directory.
+    """
     return [
         # os.path.join keeps an absolute webroot as it is
         os.path.join(project_root, webroot, event_name, production_name,
                      "pesummary", "samples", "posterior_samples.h5"),
+        os.path.join(storage, event_name, production_name, "posterior_samples.h5"),
         os.path.join(project_root, storage, event_name, production_name,
                      "posterior_samples.h5"),
     ]
 
 
+def candidate_metafiles(event_name, production_name):
+    """:func:`metafile_candidates`, with the locations taken from the project config."""
+    from asimov import config
+
+    return metafile_candidates(
+        event_name, production_name,
+        webroot=config.get("general", "webroot"),
+        project_root=config.get("project", "root", fallback=""),
+        storage=config.get("storage", "directory", fallback="results"),
+    )
+
+
 def get_metafile_path(event_name, production_name):
     """Path to the posterior samples file for an analysis.
 
-    Looks in the web root (where PESummary writes its pages) and then in the
-    project's results store, and returns the first which exists.  If neither
-    does the first candidate is returned, so that the caller can report it.
+    Returns the first of :func:`metafile_candidates` which exists.  If none
+    does the first is returned, so that the caller can report it.
     """
     candidates = candidate_metafiles(event_name, production_name)
     for path in candidates:
