@@ -2,225 +2,41 @@
 Automated PE Review Tests
 ==========================
 
-This module provides comprehensive automated quality checks for parameter estimation
+This module provides automated quality checks for parameter estimation
 analyses. Tests run once per production and generate an HTML report for review.
 
 The tests check for common failure modes including:
-- Spin magnitude railing at physical bounds
+- Posterior support for high spins compared with the prior
 - Poor sampling quality (low effective sample size)
+- Multiple modes in the key mass and distance parameters
 - Derived parameter inconsistencies
-- Evidence/Bayes factor sanity checks
+- Likelihood sanity
+- Implausible signal strength (consistent with noise, or too loud for a
+  near-threshold candidate) and strong dominance by a single detector
 - Sky localization quality
 - Network SNR consistency
 
-Tests are designed to run without requiring trained ML models.
+The helpers are in ``review_utils``, which is shared with the standalone
+script.  By default only uploaded bilby analyses which have not yet been
+reviewed are tested; set ``PE_REVIEW_INCLUDE_REVIEWED=1`` to test the others,
+and ``PE_REVIEW_REPORT_DIR`` to write the reports somewhere other than the
+web root.  Tests are designed to run without requiring trained ML models.
 """
 
 from asimov.testing import AsimovTest
-from asimov import config
-import numpy as np
-import h5py as h5
 import os
 from datetime import datetime
 from collections import defaultdict
 import json
 
-
-def get_metafile_path(event_name, production_name):
-    """
-    Get the path to the posterior_samples.h5 file using asimov config.
-
-    Parameters
-    ----------
-    event_name : str
-        Name of the event
-    production_name : str
-        Name of the production/analysis
-
-    Returns
-    -------
-    metafile : str
-        Full path to posterior_samples.h5
-    """
-    webroot = config.get("general", "webroot")
-    project_root = config.get("project", "root", fallback="")
-
-    if project_root:
-        metafile = os.path.join(project_root, webroot, event_name,
-                               production_name, "pesummary", "samples",
-                               "posterior_samples.h5")
-    else:
-        metafile = os.path.join(webroot, event_name, production_name,
-                               "pesummary", "samples", "posterior_samples.h5")
-
-    return metafile
-
-
-def open_pesummary_samples(metafile):
-    """
-    Open and extract posterior and prior samples from PESummary HDF5 file.
-
-    Parameters
-    ----------
-    metafile : str
-        Path to the posterior_samples.h5 file
-
-    Returns
-    -------
-    posterior : numpy.ndarray
-        Structured array containing posterior samples
-    prior : dict
-        Dictionary of prior samples for each parameter
-    """
-    with h5.File(metafile) as metafile_h:
-        analyses = list(metafile_h.keys())
-        if "history" in analyses:
-            analyses.remove("history")
-        if "version" in analyses:
-            analyses.remove("version")
-
-        key = analyses[0]
-
-        posterior = np.array(metafile_h[key]['posterior_samples'])
-        prior = dict(metafile_h[key]['priors']['samples'])
-        prior = {name: np.array(data) for name, data in prior.items()}
-
-    return posterior, prior
-
-
-def calculate_ess(samples):
-    """
-    Calculate effective sample size using autocorrelation.
-
-    Parameters
-    ----------
-    samples : array_like
-        1D array of samples
-
-    Returns
-    -------
-    ess : float
-        Effective sample size
-    """
-    n = len(samples)
-    if n < 2:
-        return n
-
-    # Demean
-    samples = samples - np.mean(samples)
-
-    # Calculate autocorrelation
-    c0 = np.dot(samples, samples) / n
-    if c0 == 0:
-        return n
-
-    # Sum autocorrelations until they become negative or negligible
-    autocorr_sum = 0
-    for k in range(1, min(n, 1000)):
-        ck = np.dot(samples[:-k], samples[k:]) / (n - k)
-        autocorr_sum += ck / c0
-        if ck / c0 < 0.05:  # Stop when autocorr drops below 5%
-            break
-
-    ess = n / (1 + 2 * autocorr_sum)
-    return max(1, ess)  # ESS should be at least 1
-
-
-def check_parameter_consistency(posterior, param_derived, param_inputs, calculation_func, tolerance=1e-3):
-    """
-    Check that derived parameters are consistent with sampled parameters.
-
-    Parameters
-    ----------
-    posterior : numpy.ndarray
-        Structured array of posterior samples
-    param_derived : str
-        Name of the derived parameter to check
-    param_inputs : list of str
-        Names of input parameters used in calculation
-    calculation_func : callable
-        Function that calculates derived parameter from inputs
-    tolerance : float
-        Relative tolerance for consistency check
-
-    Returns
-    -------
-    is_consistent : bool
-        True if derived parameter matches calculation
-    max_error : float
-        Maximum relative error found
-    """
-    # Check all parameters exist
-    for param in [param_derived] + param_inputs:
-        if param not in posterior.dtype.names:
-            return None, None
-
-    # Get values
-    derived_values = posterior[param_derived]
-    input_values = [posterior[param] for param in param_inputs]
-
-    # Calculate what the derived values should be
-    calculated_values = calculation_func(*input_values)
-
-    # Check consistency
-    relative_errors = np.abs(derived_values - calculated_values) / (np.abs(derived_values) + 1e-10)
-    max_error = np.max(relative_errors)
-    is_consistent = max_error < tolerance
-
-    return is_consistent, max_error
-
-
-def calculate_sky_area_90(ra, dec, num_bins=50):
-    """
-    Calculate approximate 90% credible area for sky localization.
-
-    Parameters
-    ----------
-    ra : array_like
-        Right ascension samples (radians)
-    dec : array_like
-        Declination samples (radians)
-    num_bins : int
-        Number of bins for 2D histogram
-
-    Returns
-    -------
-    area_90 : float
-        90% credible area in square degrees
-    """
-    # Create 2D histogram
-    H, ra_edges, dec_edges = np.histogram2d(ra, dec, bins=num_bins)
-
-    # Normalize to get probability density
-    H = H / np.sum(H)
-
-    # Flatten and sort
-    H_flat = H.flatten()
-    sorted_indices = np.argsort(H_flat)[::-1]
-
-    # Find 90% credible region
-    cumsum = np.cumsum(H_flat[sorted_indices])
-    idx_90 = np.searchsorted(cumsum, 0.90)
-
-    # Calculate area (rough approximation)
-    ra_bin_width = (ra_edges[1] - ra_edges[0])
-    dec_bin_width = (dec_edges[1] - dec_edges[0])
-
-    # Account for spherical geometry: area element is cos(dec) * dra * ddec
-    dec_centers = (dec_edges[:-1] + dec_edges[1:]) / 2
-
-    # Count bins in 90% region and weight by cos(dec)
-    area_steradian = 0
-    for i in range(num_bins):
-        for j in range(num_bins):
-            flat_idx = i * num_bins + j
-            if flat_idx in sorted_indices[:idx_90+1]:
-                area_steradian += ra_bin_width * dec_bin_width * np.cos(dec_centers[j])
-
-    # Convert to square degrees
-    area_deg2 = area_steradian * (180 / np.pi) ** 2
-
-    return area_deg2
+import review_utils as utils
+from review_utils import (
+    get_metafile_path,
+    get_report_path,
+    open_pesummary_samples,
+    read_run_info,
+    should_review,
+)
 
 
 class TestAutomatedReview(AsimovTest):
@@ -261,541 +77,103 @@ class TestAutomatedReview(AsimovTest):
         """
         self.test_results[event_name][production_name][test_name] = result
 
-    def test_spin_magnitude_railing(self):
+    def analyses_to_review(self, test_key):
         """
-        Compare spin parameter posteriors to priors.
+        The (event, production, metafile) triples to be tested.
 
-        For spin parameters (a_1, a_2, chi_eff, chi_p), we compare the posterior
-        distribution to the prior. If the posterior shows significantly more
-        support for high spins (>0.7) than the prior, this indicates the data
-        prefers high-spin systems, which may warrant additional scrutiny.
-
-        This approach avoids false positives from railing at physical boundaries
-        (0 and 1 are both valid spin values) and instead focuses on whether the
-        data is driving the posterior away from the prior in interesting ways.
+        A SKIP is recorded for any analysis whose samples can't be found, and
+        the calling test is skipped if there is nothing to test at all, so
+        that a test which has checked nothing can't be mistaken for a pass.
         """
+        todo = []
         for event in self.events:
             for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
+                if not should_review(production):
+                    continue
+                metafile = get_metafile_path(event.name, production.name)
+                if not os.path.exists(metafile):
+                    self.record_result(event.name, production.name, test_key, {
+                        "status": "SKIP",
+                        "message": f"Samples not found at {metafile}"
+                    })
+                    continue
+                todo.append((event, production, metafile))
+        if not todo:
+            self.skipTest("No analyses to review")
+        return todo
 
-                        metafile = get_metafile_path(event.name, production.name)
+    def run_check(self, test_key, check, blocking=False):
+        """
+        Run ``check`` on every analysis to be reviewed and record the results.
 
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "spin_railing", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
+        ``check`` is called with the keyword arguments ``posterior``, ``prior``
+        and ``info`` (the sampler statistics) and returns a result dictionary.
+        If ``blocking`` is set a FAIL fails the test; otherwise results are only
+        recorded in the report, as for screening checks.
 
-                        posterior, prior = open_pesummary_samples(metafile)
+        Failures are collected and reported together, each with the event and
+        analysis it belongs to, so that a failure is never ambiguous.
+        """
+        failures = []
+        for event, production, metafile in self.analyses_to_review(test_key):
+            label = f"{event.name} {production.name}"
+            try:
+                posterior, prior = open_pesummary_samples(metafile)
+                result = check(posterior=posterior, prior=prior, info=read_run_info(metafile))
+            except Exception as error:
+                self.record_result(event.name, production.name, test_key, {
+                    "status": "FAIL", "message": f"Could not run check: {error!r}"})
+                failures.append(f"{label}: could not run check: {error!r}")
+                continue
+            self.record_result(event.name, production.name, test_key, result)
+            if blocking and result["status"] == "FAIL":
+                failures.append(f"{label}: {result['message']}")
+        if failures:
+            self.fail("\n".join(failures))
 
-                        issues = []
-                        warnings = []
-
-                        # Check spin parameters against prior
-                        # Compare posterior to prior to see if data is informative
-
-                        for param in ['a_1', 'a_2', 'chi_eff', 'chi_p']:
-                            if param not in posterior.dtype.names:
-                                continue
-
-                            if param not in prior or len(prior[param]) == 0:
-                                continue
-
-                            # Check if posterior shows high spin support
-                            if param in ['a_1', 'a_2', 'chi_p']:
-                                frac_high_spin = np.sum(posterior[param] > 0.7) / len(posterior[param])
-                                prior_frac_high = np.sum(prior[param] > 0.7) / len(prior[param]) if len(prior[param]) > 0 else 0
-
-                                # If significantly more high-spin samples than prior expects, flag it
-                                if frac_high_spin > prior_frac_high + 0.1:  # 10% more than prior
-                                    label = "high spin" if param != 'chi_p' else "high precession"
-                                    warnings.append(f"{param}: {frac_high_spin*100:.1f}% > 0.7 ({label}), prior: {prior_frac_high*100:.1f}%")
-
-                            # For chi_eff, check both tails
-                            elif param == 'chi_eff':
-                                # Check if clustering at bounds relative to prior
-                                post_upper = np.sum(posterior[param] > 0.9) / len(posterior[param])
-                                post_lower = np.sum(posterior[param] < -0.9) / len(posterior[param])
-                                prior_upper = np.sum(prior[param] > 0.9) / len(prior[param]) if len(prior[param]) > 0 else 0
-                                prior_lower = np.sum(prior[param] < -0.9) / len(prior[param]) if len(prior[param]) > 0 else 0
-
-                                if post_upper > prior_upper + 0.1:
-                                    warnings.append(f"chi_eff: {post_upper*100:.1f}% near +1, prior: {prior_upper*100:.1f}%")
-                                if post_lower > prior_lower + 0.1:
-                                    warnings.append(f"chi_eff: {post_lower*100:.1f}% near -1, prior: {prior_lower*100:.1f}%")
-
-                        # Determine status: FAIL for issues, WARNING for warnings, PASS otherwise
-                        if issues:
-                            status = "FAIL"
-                            message = "; ".join(issues)
-                        elif warnings:
-                            status = "WARNING"
-                            message = "; ".join(warnings)
-                        else:
-                            status = "PASS"
-                            message = "No spin railing issues detected"
-
-                        self.record_result(event.name, production.name, "spin_railing", {
-                            "status": status,
-                            "message": message,
-                            "details": {"issues": issues, "warnings": warnings}
-                        })
-
-                        self.assertEqual(len(issues), 0, msg="\n".join(issues))
+    def test_spin_prior_comparison(self):
+        """Spins should not be pushed towards their bounds relative to the prior (warning only)."""
+        self.run_check("spin_prior_comparison",
+                       lambda posterior, prior, info: utils.check_spin_prior(posterior, prior))
 
     def test_effective_sample_size(self):
-        """
-        Check number of samples is sufficient.
-
-        For nested sampling, samples should be independent (IID), so we simply
-        check that enough samples were generated. Sample count thresholds:
-        - FAIL: < 2000 samples (insufficient for reliable posteriors)
-        - WARNING: 2000-5000 samples (marginal, may have large uncertainties)
-        - PASS: ≥ 5000 samples (good)
-
-        Low sample counts may indicate:
-        - Analysis terminated early
-        - Convergence issues
-        - Insufficient nlive or sampling time
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "sample_count", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-                        n_samples = len(posterior)
-
-                        fail_threshold = 2000
-                        warning_threshold = 5000
-
-                        if n_samples < fail_threshold:
-                            status = "FAIL"
-                            message = f"Only {n_samples} samples (minimum: {fail_threshold})"
-                        elif n_samples < warning_threshold:
-                            status = "WARNING"
-                            message = f"{n_samples} samples (recommended: ≥{warning_threshold})"
-                        else:
-                            status = "PASS"
-                            message = f"{n_samples} samples collected"
-
-                        self.record_result(event.name, production.name, "sample_count", {
-                            "status": status,
-                            "message": message,
-                            "details": {
-                                "n_samples": n_samples,
-                                "fail_threshold": fail_threshold,
-                                "warning_threshold": warning_threshold
-                            }
-                        })
-
-                        self.assertGreaterEqual(n_samples, fail_threshold,
-                                       msg=f"Insufficient samples: {n_samples} < {fail_threshold}")
+        """The effective number of samples should be sufficient."""
+        self.run_check("effective_sample_size",
+                       lambda posterior, prior, info: utils.check_effective_sample_size(len(posterior), info),
+                       blocking=True)
 
     def test_multimodality(self):
-        """
-        Check for multimodality in key parameters.
-
-        Multimodal posteriors can indicate:
-        - Multiple valid solutions (e.g., mass ratio near 1 has symmetry)
-        - Poor convergence or mixing
-        - Interesting astrophysical features
-
-        We use a simple approach: check if the posterior has multiple well-separated
-        peaks by looking for significant gaps in the sorted samples. This is a
-        screening test - any flagged cases should be investigated further.
-
-        Parameters checked: mass_ratio, chirp_mass, luminosity_distance
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "multimodality", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-
-                        warnings = []
-                        details = {}
-
-                        # Check key parameters for multimodality
-                        for param in ['mass_ratio', 'chirp_mass', 'luminosity_distance']:
-                            if param not in posterior.dtype.names:
-                                continue
-
-                            data = posterior[param]
-                            sorted_data = np.sort(data)
-
-                            # Look for large gaps that might indicate separate modes
-                            # A gap is "large" if it's much bigger than typical spacing
-                            diffs = np.diff(sorted_data)
-                            median_diff = np.median(diffs)
-                            large_gaps = diffs > 5 * median_diff  # Gap > 5x typical spacing
-
-                            if np.any(large_gaps):
-                                n_gaps = np.sum(large_gaps)
-                                max_gap = np.max(diffs[large_gaps])
-                                gap_fraction = max_gap / (np.max(data) - np.min(data))
-
-                                details[param] = {
-                                    'n_large_gaps': int(n_gaps),
-                                    'max_gap_fraction': float(gap_fraction),
-                                    'median_spacing': float(median_diff)
-                                }
-
-                                # Only warn if gap is significant (>5% of range)
-                                if gap_fraction > 0.05:
-                                    warnings.append(f"{param}: {n_gaps} large gap(s), max={gap_fraction*100:.1f}% of range")
-
-                        if warnings:
-                            status = "WARNING"
-                            message = "Possible multimodality: " + "; ".join(warnings)
-                        else:
-                            status = "PASS"
-                            message = "No significant multimodality detected"
-
-                        self.record_result(event.name, production.name, "multimodality", {
-                            "status": status,
-                            "message": message,
-                            "details": details
-                        })
-
-                        # Don't fail on multimodality, just warn
-                        # self.assertEqual(len(warnings), 0, msg="\n".join(warnings))
+        """Parameters should not have several modes (warning only)."""
+        self.run_check("multimodality",
+                       lambda posterior, prior, info: utils.check_multimodality(posterior))
 
     def test_derived_parameter_consistency(self):
-        """
-        Verify derived parameters are consistent with sampled parameters.
+        """Derived parameters should agree with the parameters they derive from."""
+        self.run_check("parameter_consistency",
+                       lambda posterior, prior, info: utils.check_derived_parameters(posterior),
+                       blocking=True)
 
-        Some parameters are derived from others (e.g., total_mass = mass_1 + mass_2,
-        chirp_mass from mass_1 and mass_2, mass_ratio = mass_2/mass_1).
+    def test_likelihood_sanity(self):
+        """The log-likelihood and log-prior samples should be well behaved."""
+        self.run_check("likelihood_sanity",
+                       lambda posterior, prior, info: utils.check_likelihood(posterior),
+                       blocking=True)
 
-        Inconsistencies can indicate:
-        - Post-processing errors
-        - File corruption
-        - Incorrect parameter transformations
-
-        This test checks several key relationships with 0.1% tolerance.
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "parameter_consistency", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-
-                        issues = []
-                        checks = []
-
-                        # Check total_mass = mass_1 + mass_2
-                        is_consistent, max_error = check_parameter_consistency(
-                            posterior, 'total_mass', ['mass_1', 'mass_2'],
-                            lambda m1, m2: m1 + m2
-                        )
-                        if is_consistent is not None:
-                            checks.append(f"total_mass consistency: {max_error:.2e}")
-                            if not is_consistent:
-                                issues.append(f"total_mass inconsistent with mass_1 + mass_2 (max error: {max_error:.2e})")
-
-                        # Check mass_ratio = mass_2 / mass_1
-                        is_consistent, max_error = check_parameter_consistency(
-                            posterior, 'mass_ratio', ['mass_2', 'mass_1'],
-                            lambda m2, m1: m2 / m1
-                        )
-                        if is_consistent is not None:
-                            checks.append(f"mass_ratio consistency: {max_error:.2e}")
-                            if not is_consistent:
-                                issues.append(f"mass_ratio inconsistent with mass_2/mass_1 (max error: {max_error:.2e})")
-
-                        # Check chirp_mass from mass_1 and mass_2
-                        def calc_chirp_mass(m1, m2):
-                            return (m1 * m2)**(3/5) / (m1 + m2)**(1/5)
-
-                        is_consistent, max_error = check_parameter_consistency(
-                            posterior, 'chirp_mass', ['mass_1', 'mass_2'],
-                            calc_chirp_mass
-                        )
-                        if is_consistent is not None:
-                            checks.append(f"chirp_mass consistency: {max_error:.2e}")
-                            if not is_consistent:
-                                issues.append(f"chirp_mass inconsistent with calculation (max error: {max_error:.2e})")
-
-                        self.record_result(event.name, production.name, "parameter_consistency", {
-                            "status": "FAIL" if issues else "PASS",
-                            "message": "; ".join(issues) if issues else "All checked parameters consistent",
-                            "details": {"checks": checks, "issues": issues}
-                        })
-
-                        self.assertEqual(len(issues), 0,
-                                       msg=f"Parameter consistency errors:\n" + "\n".join(issues))
-
-    def test_log_evidence_sanity(self):
-        """
-        Check that log evidence (Bayes factor) values are reasonable.
-
-        Log evidence should be:
-        - A finite number (not NaN or Inf)
-        - Within reasonable bounds for GW analyses (typically -100 to 100)
-
-        Unreasonable values can indicate:
-        - Sampler failure
-        - Numerical instability
-        - Prior/likelihood issues
-
-        For log_likelihood, we check that:
-        - Values are finite
-        - Maximum likelihood is reasonable (typically > 0 for GW signals)
-        - Distribution has reasonable spread
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "log_evidence_sanity", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-
-                        issues = []
-                        details = {}
-
-                        # Check log_likelihood
-                        if 'log_likelihood' in posterior.dtype.names:
-                            log_like = posterior['log_likelihood']
-
-                            # Check for non-finite values
-                            if not np.all(np.isfinite(log_like)):
-                                n_bad = np.sum(~np.isfinite(log_like))
-                                issues.append(f"log_likelihood has {n_bad} non-finite values")
-                            else:
-                                max_log_like = np.max(log_like)
-                                mean_log_like = np.mean(log_like)
-                                std_log_like = np.std(log_like)
-
-                                details['log_likelihood'] = {
-                                    'max': float(max_log_like),
-                                    'mean': float(mean_log_like),
-                                    'std': float(std_log_like)
-                                }
-
-                                # Check if maximum is suspiciously low
-                                if max_log_like < -1000:
-                                    issues.append(f"Maximum log_likelihood is very low: {max_log_like:.1f}")
-
-                                # Check if std is suspiciously small (suggests sampling issues)
-                                if std_log_like < 0.1:
-                                    issues.append(f"log_likelihood has very small std: {std_log_like:.2e}")
-
-                        # Check log_prior
-                        if 'log_prior' in posterior.dtype.names:
-                            log_prior = posterior['log_prior']
-
-                            if not np.all(np.isfinite(log_prior)):
-                                n_bad = np.sum(~np.isfinite(log_prior))
-                                issues.append(f"log_prior has {n_bad} non-finite values")
-
-                        self.record_result(event.name, production.name, "log_evidence_sanity", {
-                            "status": "FAIL" if issues else "PASS",
-                            "message": "; ".join(issues) if issues else "Log evidence values are reasonable",
-                            "details": details
-                        })
-
-                        self.assertEqual(len(issues), 0,
-                                       msg=f"Log evidence issues:\n" + "\n".join(issues))
+    def test_snr_plausibility(self):
+        """The signal strength should be plausible for a near-threshold candidate (warning only)."""
+        self.run_check("snr_plausibility",
+                       lambda posterior, prior, info: utils.check_snr_plausibility(posterior, info))
 
     def test_sky_localization_quality(self):
-        """
-        Check sky localization quality.
-
-        This test calculates the 90% credible area from RA and Dec posteriors.
-
-        Issues flagged:
-        - Area > 1000 deg² suggests poor localization (may be expected for
-          low-SNR events or single-detector observations)
-        - Area < 0.01 deg² is suspiciously small and may indicate sampling issues
-
-        This is an informational test - failures may be expected for some events.
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "sky_localization", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-
-                        if 'ra' not in posterior.dtype.names or 'dec' not in posterior.dtype.names:
-                            self.record_result(event.name, production.name, "sky_localization", {
-                                "status": "SKIP",
-                                "message": "RA/Dec not found in posterior"
-                            })
-                            continue
-
-                        ra = posterior['ra']
-                        dec = posterior['dec']
-
-                        area_90 = calculate_sky_area_90(ra, dec)
-
-                        issues = []
-                        warning_level = "INFO"
-
-                        if area_90 > 1000:
-                            issues.append(f"Large localization area: {area_90:.1f} deg² (may be expected for low-SNR)")
-                            warning_level = "WARNING"
-                        elif area_90 < 0.01:
-                            issues.append(f"Suspiciously small localization area: {area_90:.4f} deg²")
-                            warning_level = "WARNING"
-
-                        self.record_result(event.name, production.name, "sky_localization", {
-                            "status": warning_level,
-                            "message": f"90% sky area: {area_90:.1f} deg²" + (f" - {'; '.join(issues)}" if issues else ""),
-                            "details": {"area_90_deg2": float(area_90)}
-                        })
-
-                        # Don't fail test, just record information
-                        # self.assertTrue(True)
+        """Record the 90% sky area (informational)."""
+        self.run_check("sky_localization",
+                       lambda posterior, prior, info: utils.check_sky_localization(posterior))
 
     def test_network_snr_consistency(self):
-        """
-        Check network SNR is consistent with individual detector SNRs.
-
-        Network optimal SNR should equal the quadrature sum of individual
-        detector optimal SNRs:
-
-            SNR_network² = SNR_H1² + SNR_L1² + SNR_V1² + ...
-
-        Inconsistencies may indicate:
-        - Post-processing errors
-        - Missing detector data
-        - Incorrect SNR calculations
-
-        Tolerance is set to 1% relative error.
-        """
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-
-                        metafile = get_metafile_path(event.name, production.name)
-
-                        if not os.path.exists(metafile):
-                            self.record_result(event.name, production.name, "network_snr", {
-                                "status": "SKIP",
-                                "message": "Metafile not found"
-                            })
-                            continue
-
-                        posterior, prior = open_pesummary_samples(metafile)
-
-                        # Check if we have network SNR
-                        if 'network_optimal_snr' not in posterior.dtype.names:
-                            self.record_result(event.name, production.name, "network_snr", {
-                                "status": "SKIP",
-                                "message": "network_optimal_snr not found"
-                            })
-                            continue
-
-                        network_snr = posterior['network_optimal_snr']
-
-                        # Find all detector SNRs
-                        detector_snrs = {}
-                        for det in ['H1', 'L1', 'V1', 'K1']:  # Common detectors
-                            snr_key = f'{det}_optimal_snr'
-                            if snr_key in posterior.dtype.names:
-                                detector_snrs[det] = posterior[snr_key]
-
-                        if len(detector_snrs) == 0:
-                            self.record_result(event.name, production.name, "network_snr", {
-                                "status": "SKIP",
-                                "message": "No detector SNRs found"
-                            })
-                            continue
-
-                        # Calculate expected network SNR
-                        expected_network_snr_sq = sum(snr**2 for snr in detector_snrs.values())
-                        expected_network_snr = np.sqrt(expected_network_snr_sq)
-
-                        # Check consistency
-                        relative_error = np.abs(network_snr - expected_network_snr) / network_snr
-                        max_error = np.max(relative_error)
-                        mean_error = np.mean(relative_error)
-
-                        issues = []
-                        if max_error > 0.01:  # 1% tolerance
-                            issues.append(f"Network SNR inconsistent (max error: {max_error*100:.2f}%)")
-
-                        mean_network_snr = np.mean(network_snr)
-                        detector_info = {det: float(np.mean(snr)) for det, snr in detector_snrs.items()}
-
-                        self.record_result(event.name, production.name, "network_snr", {
-                            "status": "FAIL" if issues else "PASS",
-                            "message": f"Mean network SNR: {mean_network_snr:.1f}" + (f" - {'; '.join(issues)}" if issues else ""),
-                            "details": {
-                                "network_snr_mean": float(mean_network_snr),
-                                "detector_snrs": detector_info,
-                                "max_relative_error": float(max_error)
-                            }
-                        })
-
-                        self.assertEqual(len(issues), 0,
-                                       msg=f"Network SNR inconsistency:\n" + "\n".join(issues))
+        """The network SNR should be the quadrature sum of the detector SNRs."""
+        self.run_check("network_snr",
+                       lambda posterior, prior, info: utils.check_network_snr(posterior),
+                       blocking=True)
 
     @classmethod
     def generate_event_html(cls, event_name, event_results, timestamp):
@@ -1561,16 +939,7 @@ class TestAutomatedReview(AsimovTest):
             event_html = cls.generate_event_html(event_name, event_results, timestamp)
 
             for production_name in event_results.keys():
-                # Construct path to production directory using config
-                webroot = config.get("general", "webroot")
-                project_root = config.get("project", "root", fallback="")
-
-                if project_root:
-                    report_path = os.path.join(project_root, webroot, event_name,
-                                              production_name, "automated_review.html")
-                else:
-                    report_path = os.path.join(webroot, event_name, production_name,
-                                              "automated_review.html")
+                report_path = get_report_path(event_name, production_name)
 
                 # Create directory if it doesn't exist
                 os.makedirs(os.path.dirname(report_path), exist_ok=True)

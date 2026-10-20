@@ -1,67 +1,70 @@
-from asimov.testing import AsimovTest
-import configparser
-from bilby_pipe import bilbyargparser
-import ast
-import os
-import glob
-import dill
-import h5py as h5
+"""Check for railing of the posteriors against the prior bounds."""
+
 import numpy as np
+from asimov.testing import AsimovTest
 import peconfigurator.auxiliary.run_analyzer as configurator
 
-def open_pesummary_samples(metafile):
-    with h5.File(metafile) as metafile_h:
-        analyses = list(metafile_h.keys())
-        if "history" in analyses:
-            analyses.remove("history")
-        if "version" in analyses:
-            analyses.remove("version")
+import os
 
-        key = analyses[0]
-
-        posterior = np.array(metafile_h[key]['posterior_samples'])
-        prior = dict(metafile_h[key]['priors']['samples'])
-        prior = {name: np.array(data) for name, data in prior.items()}
-        #print(prior)
-        
-    return posterior, prior
+from review_utils import get_metafile_path, open_pesummary_samples, should_review
 
 
 class TestBilbyAnalysesForRailing(AsimovTest):
-    def test_distance_railing(self):
-        """Check for railing in the distance posterior"""
+    """
+    A posterior which piles up against a prior bound means the bound is cutting
+    off real support, so the prior should be widened.  The check is the one used
+    by peconfigurator: the end bins of a histogram are compared to the highest.
+    """
 
+    def railing_failures(self, param, check_lower, check_upper, prior_minimum=False):
+        """
+        Check ``param`` in every analysis which should be reviewed, and fail if
+        the posterior rails at an end which is being checked.
+
+        Every analysis is checked and the failures reported together, each
+        with its event and analysis.  If ``prior_minimum`` is set the smallest
+        prior sample is passed to the check, which then ignores lower railing
+        when the prior already extends below the suggested new bound.
+        """
+        failures = []
+        checked = 0
         for event in self.events:
             for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded")\
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-                        
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
-                        posterior, prior = open_pesummary_samples(metafile)
-                        railing_down, railing_up, rec, _ = configurator.railing_check(posterior["luminosity_distance"],
-                                                             Nbin=50,
-                                                             tolerance=2.0,
-                                                             label="luminosity_distance")
-                        self.assertFalse(railing_up, msg=f"Railing detected in luminosity distance at the upper bound; recommend this is adjusted to {_[1]}")
-                        #self.assertFalse(railing_down)
+                if not should_review(production):
+                    continue
+                label = f"{event.name} {production.name}"
+                metafile = get_metafile_path(event.name, production.name)
+                if not os.path.exists(metafile):
+                    failures.append(f"{label}: samples not found at {metafile}")
+                    continue
+
+                posterior, prior = open_pesummary_samples(metafile)
+                kwargs = {}
+                if prior_minimum and len(prior.get(param, [])):
+                    kwargs["input_min_edge"] = float(np.min(prior[param]))
+
+                down, up, _, (bound_low, bound_high) = configurator.railing_check(
+                    posterior[param], Nbin=50, tolerance=2.0, label=param, **kwargs)
+                checked += 1
+
+                if check_lower and down:
+                    failures.append(f"{label}: railing in {param} at the lower bound; "
+                                    f"recommend this is adjusted to {bound_low}")
+                if check_upper and up:
+                    failures.append(f"{label}: railing in {param} at the upper bound; "
+                                    f"recommend this is adjusted to {bound_high}")
+        if not checked and not failures:
+            self.skipTest("No analyses to review")
+        if failures:
+            self.fail("\n".join(failures))
+
+    def test_distance_railing(self):
+        """Check for railing in the luminosity distance posterior."""
+        # Distance can legitimately pile up towards zero, which the check
+        # ignores if the prior already extends below the suggested bound.
+        self.railing_failures("luminosity_distance", check_lower=True, check_upper=True,
+                              prior_minimum=True)
 
     def test_chirp_railing(self):
-        """Check for railing in the chirp_mass posterior"""
-
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name.lower() == "bilby") \
-                   and (production.status_str.lower() == "uploaded") \
-                   and (production.review.status not in ["REJECTED", "APPROVED", "DEPRECATED"]):
-                    with self.subTest(event=event.name, production=production.name):
-                        
-                        metafile = f"/home/pe.o4/public_html/gwtc4-fogg/{event.name}/{production.name}/pesummary/samples/posterior_samples.h5"
-                        posterior, prior = open_pesummary_samples(metafile)
-                        railing_down, railing_up, rec, _ = configurator.railing_check(posterior["chirp_mass"],
-                                                             Nbin=50,
-                                                             tolerance=2.0,
-                                                             label="chirp_mass")
-                        self.assertFalse(railing_up, msg=f"Railing detected in mass ratio at the upper bound; recommend this is adjusted to {_[1]}")
-                        self.assertFalse(railing_down, msg=f"Railing detected in mass ratio at the lower bound; recommend this is adjusted to {_[0]}")
+        """Check for railing in the chirp mass posterior."""
+        self.railing_failures("chirp_mass", check_lower=True, check_upper=True)

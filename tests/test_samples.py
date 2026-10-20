@@ -1,64 +1,46 @@
-from asimov.testing import AsimovTest
-import configparser
-from bilby_pipe import bilbyargparser
-import ast
-#import bilbyargparser.BilbyConfigFileParser as bilby_parse
-import os
+"""Check that no samples were lost in the sampler output."""
+
 import glob
+
 import dill
+from asimov.testing import AsimovTest
+
+from review_utils import is_approved, is_bilby, is_uploaded, should_review
+
 
 class TestBilbyAnalyses(AsimovTest):
-    def test_sample_loss(self):
-        """Verify the component chirp mass prior is correct."""
+    def sample_loss(self, selector):
+        """
+        Verify that the dynesty result of each selected analysis holds all of
+        the samples: ``niter + nlive`` of them.
 
+        Failures are reported together with their event and analysis. The test
+        is skipped if no result was found, so that a test which has checked
+        nothing can't pass.
+        """
+        checked = 0
+        failures = []
         for event in self.events:
             for production in event.productions:
-                if (production.pipeline.name == "Bilby") \
-                   and (production.status_str.lower() == "uploaded") \
-                   and (production.review.status == "APPROVED"):
-                    with self.subTest(event=event.name, production=production.name):
-                        # Read the config file
-                        pickles = glob.glob(f"{production.rundir}/result/*dynesty.pickle")
+                if not (is_bilby(production) and is_uploaded(production) and selector(production)):
+                    continue
+                for fname in glob.glob(f"{production.rundir}/result/*dynesty.pickle"):
+                    with open(fname, "rb") as ff:
+                        result = dill.load(ff)
+                    checked += 1
+                    expected = result.niter + result.nlive
+                    if expected != len(result.samples):
+                        failures.append(f"{event.name} {production.name}: {len(result.samples)} samples, "
+                                        f"expected niter + nlive = {expected}")
+        if failures:
+            self.fail("\n".join(failures))
+        if not checked:
+            self.skipTest("No sampler results found for the selected analyses")
 
-                        for fname in pickles:
-                            with open(fname, "rb") as ff:
-                                result = dill.load(ff)
-                                self.assertEqual((result.niter + result.nlive), len(result.samples))
+    def test_sample_loss_approved(self):
+        """Verify samples are not lost in approved analyses."""
+        self.sample_loss(is_approved)
 
     def test_sample_loss_unreviewed(self):
-        """Verify samples are not lost in unreviewed analyses"""
-
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name == "Bilby") \
-                   and (production.status_str.lower() == "uploaded") \
-                   and len(production.review) == 0:
-                    with self.subTest(event=event.name, production=production.name):
-                        # Read the config file
-                        pickles = glob.glob(f"{production.rundir}/result/*dynesty.pickle")
-
-                        for fname in pickles:
-                            with open(fname, "rb") as ff:
-                                result = dill.load(ff)
-                                self.assertEqual((result.niter + result.nlive), len(result.samples))
-
-                                
-
-    def test_sample_loss_reviewed(self):
-        """Verify samples are not lost in reviewed analyses"""
-
-        for event in self.events:
-            for production in event.productions:
-                if (production.pipeline.name == "Bilby") \
-                   and (production.status_str.lower() == "uploaded") \
-                   and production.review.status is not None and production.review.status.lower() == "approved":
-                    with self.subTest(event=event.name, production=production.name):
-                        # Read the config file
-                        pickles = glob.glob(f"{production.rundir}/result/*dynesty.pickle")
-
-                        for fname in pickles:
-                            with open(fname, "rb") as ff:
-                                result = dill.load(ff)
-                                self.assertEqual((result.niter + result.nlive), len(result.samples))
-
-                                
+        """Verify samples are not lost in analyses which are awaiting review."""
+        self.sample_loss(should_review)
