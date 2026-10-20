@@ -511,25 +511,33 @@ def check_snr_plausibility(posterior, info):
     * More than DETECTOR_DOMINANCE_THRESHOLD of the SNR^2 in one detector (of
       two or more): the candidate may be a glitch in that detector.
 
-    Screening only: a WARNING, never a FAIL.
+    The details give each of the three conditions separately, as
+    ``consistent_with_noise``, ``implausibly_loud`` and
+    ``single_detector_dominated``.  Screening only: a WARNING, never a FAIL.
     """
     names = posterior.dtype.names
     snr_key = next((k for k in SNR_KEYS if k in names), None)
     snr = float(np.median(np.real(posterior[snr_key]))) if snr_key else None
     ln_bf = info.get("ln_bayes_factor")
-    details = {"median_network_snr": snr, "ln_bayes_factor": ln_bf}
     warnings = []
 
+    noise_like = bool((ln_bf is not None and ln_bf < LN_BAYES_FACTOR_THRESHOLD)
+                      or (snr is not None and snr < SNR_NOISE_THRESHOLD))
     if ln_bf is not None and ln_bf < LN_BAYES_FACTOR_THRESHOLD:
         warnings.append(f"ln Bayes factor {ln_bf:.2f} < {LN_BAYES_FACTOR_THRESHOLD:g}: "
                         "consistent with noise")
     if snr is not None and snr < SNR_NOISE_THRESHOLD:
         warnings.append(f"median network SNR {snr:.1f} < {SNR_NOISE_THRESHOLD:g}: "
                         "consistent with noise")
-    if snr is not None and snr > SNR_LOUD_THRESHOLD:
+
+    loud = bool(snr is not None and snr > SNR_LOUD_THRESHOLD)
+    if loud:
         warnings.append(f"median network SNR {snr:.1f} > {SNR_LOUD_THRESHOLD:g}: "
                         "implausibly loud for a near-threshold candidate")
 
+    details = {"median_network_snr": snr, "ln_bayes_factor": ln_bf,
+               "consistent_with_noise": noise_like, "implausibly_loud": loud,
+               "single_detector_dominated": False}
     detector_snr_sq = {det: float(np.median(posterior[f"{det}_optimal_snr"])) ** 2
                        for det in ("H1", "L1", "V1", "K1") if f"{det}_optimal_snr" in names}
     if len(detector_snr_sq) > 1:
@@ -537,6 +545,7 @@ def check_snr_plausibility(posterior, info):
         fraction = detector_snr_sq[dominant] / sum(detector_snr_sq.values())
         details["dominant_detector"] = {"detector": dominant, "snr_squared_fraction": fraction}
         if fraction > DETECTOR_DOMINANCE_THRESHOLD:
+            details["single_detector_dominated"] = True
             warnings.append(f"{dominant} contributes {fraction*100:.0f}% of the SNR^2")
 
     if warnings:

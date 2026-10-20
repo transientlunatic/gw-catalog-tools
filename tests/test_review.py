@@ -147,6 +147,9 @@ class TestChecks:
                          H1_optimal_snr=np.full(100, 3.0), L1_optimal_snr=np.full(100, 9.0))
         result = utils.check_snr_plausibility(post, {"ln_bayes_factor": 10.0})
         assert result["status"] == "WARNING" and "L1" in result["message"]
+        assert result["details"]["single_detector_dominated"]
+        assert not result["details"]["consistent_with_noise"]
+        assert not result["details"]["implausibly_loud"]
 
     def test_inconsistent_derived_parameters_fail(self):
         m1, m2 = np.full(100, 30.0), np.full(100, 20.0)
