@@ -6,6 +6,7 @@ This module provides automated quality checks for parameter estimation
 analyses. Tests run once per production and generate an HTML report for review.
 
 The tests check for common failure modes including:
+- Railing of the chirp mass and distance posteriors against the prior bounds
 - Posterior support for high spins compared with the prior
 - Poor sampling quality (low effective sample size)
 - Multiple modes in the key mass and distance parameters
@@ -16,8 +17,8 @@ The tests check for common failure modes including:
 - Sky localization quality
 - Network SNR consistency
 
-The helpers are in ``review_utils``, which is shared with the standalone
-script.  By default only uploaded bilby analyses which have not yet been
+The checks themselves are in ``catalog_tools.review``, which is shared with the
+command line (``catalog-tools review``).  By default only uploaded bilby analyses which have not yet been
 reviewed are tested; set ``PE_REVIEW_INCLUDE_REVIEWED=1`` to test the others,
 and ``PE_REVIEW_REPORT_DIR`` to write the reports somewhere other than the
 web root.  Tests are designed to run without requiring trained ML models.
@@ -29,8 +30,8 @@ from datetime import datetime
 from collections import defaultdict
 import json
 
-import review_utils as utils
-from review_utils import (
+from catalog_tools import review as utils
+from catalog_tools.review import (
     get_metafile_path,
     get_report_path,
     open_pesummary_samples,
@@ -130,6 +131,18 @@ class TestAutomatedReview(AsimovTest):
                 failures.append(f"{label}: {result['message']}")
         if failures:
             self.fail("\n".join(failures))
+
+    def test_chirp_mass_railing(self):
+        """The chirp mass posterior should not rail against the prior bounds."""
+        self.run_check("chirp_mass_railing",
+                       lambda posterior, prior, info: utils.check_railing(posterior, prior, "chirp_mass"),
+                       blocking=True)
+
+    def test_distance_railing(self):
+        """The luminosity distance posterior should not rail against the prior bounds."""
+        self.run_check("distance_railing",
+                       lambda posterior, prior, info: utils.check_railing(posterior, prior, "luminosity_distance"),
+                       blocking=True)
 
     def test_spin_prior_comparison(self):
         """Spins should not be pushed towards their bounds relative to the prior (warning only)."""

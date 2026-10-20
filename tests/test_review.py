@@ -1,5 +1,5 @@
 """
-Tests of the helpers used by the automated review.
+Tests of the checks of the automated review.
 
 These use synthetic data with known answers, and need neither asimov nor a
 project.
@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import numpy as np
 import pytest
 
-import review_utils as utils
+from catalog_tools import review as utils
 
 
 def production(pipeline="bilby", status="uploaded", review=None):
@@ -167,3 +167,121 @@ class TestChecks:
         assert utils.check_likelihood(posterior(log_likelihood=np.full(100, 5.0)))["status"] == "FAIL"
         varied = np.random.default_rng(5).normal(20, 2, 100)
         assert utils.check_likelihood(posterior(log_likelihood=varied))["status"] == "PASS"
+
+
+class TestRailing:
+    rng = np.random.default_rng(6)
+
+    def test_a_posterior_which_fits_inside_its_prior_does_not_rail(self):
+        low, high, _, bounds = utils.railing_check(self.rng.normal(50, 5, 20000))
+        assert (low, high, bounds) == (False, False, (None, None))
+
+    def test_a_posterior_cut_off_by_the_upper_bound_rails(self):
+        samples = self.rng.normal(50, 20, 40000)
+        samples = samples[samples < 60]
+        low, high, _, (bound_low, bound_high) = utils.railing_check(samples)
+        assert high and not low
+        assert bound_low is None and bound_high > samples.max()
+
+    def test_a_posterior_cut_off_by_the_lower_bound_rails(self):
+        samples = self.rng.normal(50, 20, 40000)
+        samples = samples[samples > 40]
+        low, high, _, (bound_low, _) = utils.railing_check(samples)
+        assert low and not high
+        assert bound_low < samples.min()
+
+    def test_mass_ratio_may_reach_one(self):
+        # q = 1 is a genuine boundary, so piling up there is not railing
+        samples = 1 - np.abs(self.rng.normal(0, 0.1, 20000))
+        _, high, _, _ = utils.railing_check(samples, label="mass_ratio")
+        assert not high
+        _, high, _, _ = utils.railing_check(samples, label="chirp_mass")
+        assert high
+
+    def test_a_prior_which_already_extends_further_is_not_railing(self):
+        samples = np.abs(self.rng.normal(0, 100, 40000)) + 10
+        assert utils.railing_check(samples)[0]
+        assert not utils.railing_check(samples, input_min_edge=1.0)[0]
+
+    def test_agrees_with_peconfigurator(self):
+        configurator = pytest.importorskip("peconfigurator.auxiliary.run_analyzer")
+        for scale in (5, 20, 60):
+            samples = self.rng.normal(50, scale, 40000)
+            samples = samples[(samples > 20) & (samples < 80)]
+            for kwargs in ({}, {"input_min_edge": 5.0}):
+                ours = utils.railing_check(samples, **kwargs)
+                theirs = configurator.railing_check(samples, Nbin=50, tolerance=2.0,
+                                                    label="chirp_mass", **kwargs)
+                assert ours[:2] == theirs[:2]
+                assert ours[3][0] == theirs[3][0]
+
+    def test_check_railing_reports_the_suggested_bounds(self):
+        samples = self.rng.normal(50, 20, 40000)
+        samples = samples[samples < 60]
+        result = utils.check_railing(posterior(chirp_mass=samples), {}, "chirp_mass")
+        assert result["status"] == "FAIL"
+        assert result["details"]["suggested_upper_bound"] > 60
+        ok = utils.check_railing(posterior(chirp_mass=self.rng.normal(50, 5, 20000)), {}, "chirp_mass")
+        assert ok["status"] == "PASS"
+        assert utils.check_railing(posterior(other=np.ones(10)), {}, "chirp_mass")["status"] == "SKIP"
+
+
+def write_samples(path, **columns):
+    """Write a minimal PESummary-style samples file."""
+    import h5py
+
+    n = len(next(iter(columns.values())))
+    samples = np.zeros(n, dtype=[(name, float) for name in columns])
+    for name, values in columns.items():
+        samples[name] = values
+    with h5py.File(path, "w") as handle:
+        group = handle.create_group("analysis")
+        group.create_dataset("posterior_samples", data=samples)
+        group.create_group("priors/samples")
+        group.create_dataset("meta_data/sampler/ln_bayes_factor", data=[12.0])
+        group.create_dataset("meta_data/other/run_statistics/neffsamples", data=[5000.0])
+
+
+class TestCommandLine:
+    @pytest.fixture
+    def good(self, tmp_path):
+        rng = np.random.default_rng(7)
+        n = 5000
+        path = tmp_path / "good.h5"
+        write_samples(path, chirp_mass=rng.normal(30, 3, n), luminosity_distance=rng.normal(900, 100, n),
+                      network_matched_filter_snr=np.full(n, 8.0))
+        return str(path)
+
+    def test_review_passes_a_sensible_posterior(self, good, capsys):
+        from catalog_tools import cli
+        assert cli.main(["review", good]) == 0
+        assert "PASS" in capsys.readouterr().out
+
+    def test_review_json(self, good, capsys):
+        import json
+        from catalog_tools import cli
+        cli.main(["review", good, "--json"])
+        results = json.loads(capsys.readouterr().out)
+        assert results["chirp_mass_railing"]["status"] == "PASS"
+        assert results["effective_sample_size"]["details"]["neff"] == 5000.0
+
+    def test_review_fails_a_railing_posterior(self, tmp_path, capsys):
+        from catalog_tools import cli
+        rng = np.random.default_rng(8)
+        samples = rng.normal(50, 20, 40000)
+        path = tmp_path / "railing.h5"
+        write_samples(path, chirp_mass=samples[samples < 60])
+        assert cli.main(["review", str(path)]) == 1
+        assert "railing" in capsys.readouterr().out
+
+    def test_review_reports_an_unreadable_file(self, tmp_path, capsys):
+        from catalog_tools import cli
+        assert cli.main(["review", str(tmp_path / "missing.h5")]) == 2
+
+    def test_install_tests_writes_a_module_and_will_not_overwrite_it(self, tmp_path):
+        from catalog_tools import cli
+        directory = tmp_path / "tests"
+        assert cli.main(["install-tests", str(directory)]) == 0
+        assert "catalog_tools.asimov_tests" in (directory / "test_catalog_tools.py").read_text()
+        assert cli.main(["install-tests", str(directory)]) == 1
+        assert cli.main(["install-tests", str(directory), "--force"]) == 0

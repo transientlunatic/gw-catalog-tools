@@ -5,10 +5,10 @@ import glob
 import dill
 from asimov.testing import AsimovTest
 
-from review_utils import is_approved, is_bilby, is_uploaded, should_review
+from catalog_tools.review import is_approved, is_bilby, is_uploaded, should_review
 
 
-class TestBilbyAnalyses(AsimovTest):
+class TestSampleLoss(AsimovTest):
     def sample_loss(self, selector):
         """
         Verify that the dynesty result of each selected analysis holds all of

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "gw-catalog-tools"
+version = "0.1.0"
+description = "Automated checks of gravitational-wave parameter estimation results, for catalogue production."
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [
+    { name = "Daniel Williams", email = "daniel.williams@ligo.org" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+]
+dependencies = [
+    "numpy",
+    "scipy",
+    "h5py",
+]
+
+[project.optional-dependencies]
+# What the tests which run inside an asimov project need.
+asimov = [
+    "asimov>=0.7",
+    "bilby_pipe",
+    "dill",
+]
+test = [
+    "pytest",
+]
+
+[project.scripts]
+catalog-tools = "catalog_tools.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

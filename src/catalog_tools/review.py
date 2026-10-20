@@ -1,10 +1,10 @@
 """
-Shared helpers for the automated PE review tests.
+The checks of the automated PE review.
 
-Everything which is common to the asimov-driven tests and the standalone
-script lives here so that the two cannot drift apart.  This module has no
-dependency on asimov, except for locating files through the project config,
-which is imported lazily.
+Everything which is common to the asimov-driven tests and the command line
+lives here so that the two cannot drift apart.  This module needs only numpy,
+scipy and h5py, and depends on asimov only to locate files through a project's
+config, which is imported lazily.
 
 Environment variables
 ---------------------
@@ -288,6 +288,73 @@ def calculate_sky_area_90(ra, dec, n_ra=64, n_dec=32):
     return n_cells * cell_area, cell_area
 
 
+def _sigmoid(support, steepness=0.03):
+    """Empirical sigmoid used to size the suggested new bound."""
+    return 0.66 / (1 + np.exp(-steepness * (support - 30)))
+
+
+def railing_check(samples, nbins=50, tolerance=2.0, label=None, input_min_edge=None):
+    """
+    Check whether a posterior is railing against the prior.
+
+    The posterior is histogrammed, and it is railing at an end if the bin at
+    that end holds more than ``tolerance`` percent of the density of the
+    highest bin.  The criterion, and the sizing of the suggested new bound, are
+    those of the railing check in peconfigurator (itself taken from LAPLACE),
+    which this reproduces without needing peconfigurator and its dependencies;
+    the tests compare the two when peconfigurator is installed.  The one
+    difference is that the suggested upper bound is sized from the support at
+    the upper end, where peconfigurator uses the support at the lower end.
+
+    Parameters
+    ----------
+    samples : array_like
+    nbins : int
+    tolerance : float
+        Percent of the highest bin above which an end bin counts as railing.
+    label : str, optional
+        "mass_ratio" is never reported as railing at the upper end, since
+        q = 1 is a genuine boundary.
+    input_min_edge : float, optional
+        The lower edge of the prior.  Railing at the lower end is ignored if
+        the prior already extends below the suggested new bound.  This avoids
+        false positives for distance, which can legitimately pile up near zero.
+
+    Returns
+    -------
+    railing_low, railing_high : bool
+    recommendation : str
+    suggested_bounds : tuple
+        The suggested ``(lower, upper)`` bounds; ``None`` where there is no
+        railing.
+    """
+    samples = np.asarray(samples, dtype=float)
+    hist, _ = np.histogram(samples, bins=nbins, density=True)
+    highest = np.amax(hist)
+    lower_support = hist[0] / highest * 100
+    higher_support = hist[-1] / highest * 100
+
+    railing_low = bool(lower_support > tolerance)
+    railing_high = bool(higher_support > tolerance)
+    if label == "mass_ratio":
+        railing_high = False
+
+    bound_low = bound_high = None
+    recommendation = ""
+    if railing_low:
+        edge = np.round(np.amin(samples), 4)
+        bound_low = np.round((1 - _sigmoid(lower_support)) * edge, 4)
+        recommendation += f"Railing at lower end at {edge}. Suggested new bound is {bound_low}. "
+        if input_min_edge is not None and input_min_edge < bound_low:
+            railing_low, bound_low, recommendation = False, None, ""
+    if railing_high:
+        edge = np.round(np.amax(samples), 4)
+        bound_high = np.round((1 + _sigmoid(higher_support)) * edge, 4)
+        recommendation += f"Railing at higher end at {edge}. Suggested new bound is {bound_high}"
+
+    return railing_low, railing_high, recommendation, (bound_low, bound_high)
+
+
 # ---------------------------------------------------------------------------
 # The checks
 #
@@ -523,9 +590,39 @@ def check_network_snr(posterior):
     return _result("PASS", message, **details)
 
 
+def check_railing(posterior, prior, param):
+    """
+    Check one parameter's posterior for railing against the prior bounds.
+
+    Used for chirp mass and luminosity distance.  Railing means the prior is
+    cutting off real support and should be widened, so this is a FAIL, and the
+    result includes the suggested new bounds.  For distance the prior minimum
+    is passed on so that piling up towards zero is not reported.
+    """
+    if param not in posterior.dtype.names:
+        return _result("SKIP", f"{param} not found")
+    kwargs = {}
+    if param == "luminosity_distance" and len(prior.get(param, [])):
+        kwargs["input_min_edge"] = float(np.min(prior[param]))
+    low, high, _, (bound_low, bound_high) = railing_check(posterior[param], label=param, **kwargs)
+    messages = []
+    if low:
+        messages.append(f"railing at the lower bound; recommend {bound_low}")
+    if high:
+        messages.append(f"railing at the upper bound; recommend {bound_high}")
+    details = {"railing_lower": low, "railing_upper": high,
+               "suggested_lower_bound": None if bound_low is None else float(bound_low),
+               "suggested_upper_bound": None if bound_high is None else float(bound_high)}
+    if messages:
+        return _result("FAIL", f"{param}: " + "; ".join(messages), **details)
+    return _result("PASS", f"No railing in {param}", **details)
+
+
 def run_all_checks(posterior, prior, info):
     """Every check, as ``{name: result}``."""
     return {
+        "chirp_mass_railing": check_railing(posterior, prior, "chirp_mass"),
+        "distance_railing": check_railing(posterior, prior, "luminosity_distance"),
         "spin_prior_comparison": check_spin_prior(posterior, prior),
         "effective_sample_size": check_effective_sample_size(len(posterior), info),
         "multimodality": check_multimodality(posterior),

@@ -39,6 +39,10 @@ tests:
 	cd project
 	${PYTHON} -m unittest discover tests
 
+# The unit tests of the catalog_tools package itself
+unit-tests:
+	${PYTHON} -m pytest tests
+
 makefiles: combined_summary.mk
 
-.PHONY: tests makefiles
+.PHONY: tests unit-tests makefiles
