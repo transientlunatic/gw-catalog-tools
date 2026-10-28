@@ -25,6 +25,8 @@ import numpy as np
 from scipy.ndimage import gaussian_filter1d
 from scipy.signal import find_peaks
 
+from .diptest import hartigan_diptest
+
 REVIEWED_STATES = ("REJECTED", "APPROVED", "DEPRECATED")
 
 # Network SNR columns, in order of preference
@@ -39,6 +41,9 @@ LN_BAYES_FACTOR_THRESHOLD = 1.0
 DETECTOR_DOMINANCE_THRESHOLD = 0.75
 NEFF_FAIL_THRESHOLD = 1000
 NEFF_WARNING_THRESHOLD = 2500
+
+# Hartigan's dip test: a p-value at or below this rejects unimodality
+UNIMODAL_PVAL_THRESHOLD = 0.01
 
 
 # ---------------------------------------------------------------------------
@@ -466,6 +471,50 @@ def check_multimodality(posterior):
     return _result("PASS", "Each parameter has a single mode", **details)
 
 
+def check_diptest_unimodality(posterior, pval_threshold=UNIMODAL_PVAL_THRESHOLD):
+    """
+    Hartigan's dip test for unimodality of q, chirp mass and luminosity distance.
+
+    A complement to :func:`check_multimodality`, which counts peaks: this
+    rejects unimodality statistically.  Screening only: a WARNING, never a FAIL.
+    """
+    warnings, details = [], {}
+    for param in ("mass_ratio", "chirp_mass", "luminosity_distance"):
+        if param not in posterior.dtype.names:
+            continue
+        data = posterior[param].astype(float)
+        if len(data) < 4:
+            continue
+        dip, pval = hartigan_diptest(data)
+        details[param] = {"dip": float(dip), "pval": float(pval)}
+        if pval <= pval_threshold:
+            warnings.append(f"{param}: dip={dip:.4f}, p={pval:.3f}")
+    if warnings:
+        return _result("WARNING", "Unimodality rejected: " + "; ".join(warnings), **details)
+    if not details:
+        return _result("SKIP", "No relevant parameters found")
+    return _result("PASS", "Unimodality not rejected", **details)
+
+
+def check_snr_negative(posterior):
+    """Check that no SNR column contains negative samples (a WARNING)."""
+    columns = [name for name in posterior.dtype.names
+               if ("matched_filter_snr" in name.lower() or "optimal_snr" in name.lower())
+               and "angle" not in name.lower()]
+    if not columns:
+        return _result("SKIP", "No SNR parameters found")
+    offenders = {}
+    for name in columns:
+        n_negative = int(np.sum(posterior[name] < 0))
+        if n_negative:
+            offenders[name] = {"n_negative": n_negative, "min_value": float(np.min(posterior[name]))}
+    if offenders:
+        described = "; ".join(f"{name}: {o['n_negative']} negative (min={o['min_value']:.3g})"
+                              for name, o in offenders.items())
+        return _result("WARNING", "Negative SNR samples: " + described, offenders=offenders)
+    return _result("PASS", "No negative SNR samples", columns=columns)
+
+
 def check_derived_parameters(posterior):
     """Check total mass, mass ratio and chirp mass against the component masses (0.1%)."""
     def chirp_mass(m1, m2):
@@ -652,9 +701,11 @@ def run_all_checks(posterior, prior, info):
         "spin_prior_comparison": check_spin_prior(posterior, prior),
         "effective_sample_size": check_effective_sample_size(len(posterior), info),
         "multimodality": check_multimodality(posterior),
+        "diptest_unimodality": check_diptest_unimodality(posterior),
         "parameter_consistency": check_derived_parameters(posterior),
         "likelihood_sanity": check_likelihood(posterior),
         "snr_plausibility": check_snr_plausibility(posterior, info),
         "sky_localization": check_sky_localization(posterior),
         "network_snr": check_network_snr(posterior),
+        "snr_negative": check_snr_negative(posterior),
     }

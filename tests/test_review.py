@@ -5,11 +5,13 @@ These use synthetic data with known answers, and need neither asimov nor a
 project.
 """
 
+import json
 from types import SimpleNamespace
 
 import numpy as np
 import pytest
 
+from catalog_tools import batch, cli
 from catalog_tools import review as utils
 
 
@@ -316,3 +318,90 @@ class TestFindingSamples:
         monkeypatch.setattr(utils, "candidate_metafiles", lambda event, production: utils.metafile_candidates(
             event, production, webroot="/nonexistent/web", project_root="/elsewhere", storage="results"))
         assert utils.get_metafile_path("GW1", "run-2").startswith("/nonexistent/web/")
+
+
+class TestDipTest:
+    def test_a_single_mode_is_not_rejected(self):
+        rng = np.random.default_rng(3)
+        post = posterior(chirp_mass=rng.normal(30, 3, 5000))
+        assert utils.check_diptest_unimodality(post)["status"] == "PASS"
+
+    def test_two_separated_modes_are_flagged(self):
+        rng = np.random.default_rng(3)
+        samples = np.concatenate([rng.normal(20, 1, 3000), rng.normal(40, 1, 3000)])
+        result = utils.check_diptest_unimodality(posterior(chirp_mass=samples))
+        assert result["status"] == "WARNING"
+        assert "chirp_mass" in result["message"]
+
+    def test_nothing_to_test_is_skipped(self):
+        assert utils.check_diptest_unimodality(posterior(other=np.ones(100)))["status"] == "SKIP"
+
+
+class TestNegativeSNR:
+    def test_positive_snr_passes(self):
+        assert utils.check_snr_negative(posterior(H1_matched_filter_snr=np.full(50, 5.0)))["status"] == "PASS"
+
+    def test_negative_samples_are_flagged(self):
+        values = np.full(50, 5.0)
+        values[:3] = -1.0
+        result = utils.check_snr_negative(posterior(H1_matched_filter_snr=values))
+        assert result["status"] == "WARNING"
+        assert result["details"]["offenders"]["H1_matched_filter_snr"]["n_negative"] == 3
+
+    def test_phase_angles_are_not_snr(self):
+        assert utils.check_snr_negative(posterior(H1_matched_filter_snr_angle=np.full(5, -1.0)))["status"] == "SKIP"
+
+
+class TestBatch:
+    @pytest.fixture
+    def tree(self, tmp_path):
+        rng = np.random.default_rng(7)
+        n = 5000
+        for event, analysis in (("S1", "bilby-A"), ("S1", "generate-psd"), ("S2", "bilby-A"), ("S2", "other")):
+            directory = tmp_path / event / analysis
+            directory.mkdir(parents=True)
+            write_samples(directory / "posterior_samples.h5", chirp_mass=rng.normal(30, 3, n),
+                          luminosity_distance=rng.normal(900, 100, n),
+                          network_matched_filter_snr=np.full(n, 8.0))
+        return tmp_path
+
+    def test_psd_directories_are_skipped_by_default(self, tree):
+        found = [(e, a) for e, a, _ in batch.discover_files(tree)]
+        assert found == [("S1", "bilby-A"), ("S2", "bilby-A"), ("S2", "other")]
+
+    def test_analysis_patterns_select_analyses(self, tree):
+        found = [(e, a) for e, a, _ in batch.discover_files(tree, ["bilby-*"])]
+        assert found == [("S1", "bilby-A"), ("S2", "bilby-A")]
+
+    def test_a_missing_root_is_an_error(self, tmp_path):
+        with pytest.raises(FileNotFoundError):
+            list(batch.discover_files(tmp_path / "nope"))
+
+    def test_batch_and_report(self, tree, capsys):
+        out = tree / "review.json"
+        md = tree / "review.md"
+        assert cli.main(["batch", "--root", str(tree), "--analysis", "bilby-*",
+                         "-o", str(out), "-m", str(md), "--no-emoji"]) == 0
+        data = json.loads(out.read_text())
+        assert sorted(data["events"]) == ["S1", "S2"]
+        assert data["events"]["S1"]["bilby-A"]["n_samples"] == 5000
+        assert "| S2 | bilby-A |" in md.read_text()
+
+        capsys.readouterr()
+        assert cli.main(["report", str(out), "--no-emoji", "--ignore", "sky_localization"]) == 0
+        printed = capsys.readouterr().out
+        assert "Total runs:** 2" in printed
+        assert "Sky Localization" not in printed
+
+    def test_an_unreadable_file_is_recorded_and_fails_the_batch(self, tree):
+        bad = tree / "S3" / "bilby-A"
+        bad.mkdir(parents=True)
+        (bad / "posterior_samples.h5").write_text("not hdf5")
+        out = tree / "review.json"
+        assert cli.main(["batch", "--root", str(tree), "-o", str(out)]) == 1
+        assert json.loads(out.read_text())["events"]["S3"]["bilby-A"]["load_error"]
+
+    def test_markdown_lists_railing(self):
+        data = {"events": {"S1": {"a": {"n_samples": 10, "load_error": None, "overall_status": "FAIL",
+                                        "tests": {"chirp_mass_railing": {"status": "FAIL", "notes": "rails"}}}}}}
+        assert "- **S1** / `a` — rails" in batch.generate_markdown(data)

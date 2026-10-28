@@ -79,7 +79,6 @@ def determine_sample_rate(chirp_mass):
     """
     M = 100.0  # will be ignored
     Ms = M * lal.MTSUN_SI
-    #chirp_mass *= lal.MTSUN_SI
     m1 = M * 0.5
     m2 = M * 0.5
     complexQNM = lal.CreateCOMPLEX16Vector(1)

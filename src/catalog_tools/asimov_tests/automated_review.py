@@ -163,6 +163,16 @@ class TestAutomatedReview(AsimovTest):
         self.run_check("multimodality",
                        lambda posterior, prior, info: utils.check_multimodality(posterior))
 
+    def test_diptest_unimodality(self):
+        """Hartigan's dip test should not reject unimodality (screening only)."""
+        self.run_check("diptest_unimodality",
+                       lambda posterior, prior, info: utils.check_diptest_unimodality(posterior))
+
+    def test_snr_negative(self):
+        """No SNR parameter should contain negative samples (screening only)."""
+        self.run_check("snr_negative",
+                       lambda posterior, prior, info: utils.check_snr_negative(posterior))
+
     def test_derived_parameter_consistency(self):
         """Derived parameters should agree with the parameters they derive from."""
         self.run_check("parameter_consistency",

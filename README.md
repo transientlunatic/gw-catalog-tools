@@ -31,6 +31,18 @@ catalog-tools review posterior_samples.h5 --json   # machine-readable results
 The exit status is 1 if any check FAILs, 2 if the file can't be read, and 0
 otherwise.  Warnings don't affect it.
 
+To review a whole tree of results laid out as
+`ROOT/EVENT/ANALYSIS/posterior_samples.h5`, and summarise them in a table:
+
+```bash
+catalog-tools batch --root ROOT --analysis "bilby-*" -o review.json -m review.md
+catalog-tools report review.json --no-emoji --ignore sky_localization
+```
+
+`batch` skips `generate-psd` directories unless `--exclude` says otherwise, and
+exits 1 if any analysis FAILs or can't be read.  `report` renders the JSON again
+without re-running anything.
+
 ## In an asimov project
 
 ```bash
@@ -64,6 +76,8 @@ something for an analyst to look at.  Thresholds are in `catalog_tools.review`.
 |---|---|---|---|
 | `chirp_mass_railing`, `distance_railing` | the prior cutting off real support: the end bin of a histogram of the posterior holds a significant fraction of the density of the highest bin | FAIL, with suggested new bounds | end bin > 2% of the highest of 50 bins (as in peconfigurator); not for the upper end of q, nor for the lower end of distance if the prior already extends below the suggested bound |
 | `multimodality` | more than one significant mode in q, chirp mass or (log) distance, by counting peaks of a kernel density estimate | WARNING | prominence ≥ 8% of the highest peak and ≥ 3% of the probability |
+| `diptest_unimodality` | Hartigan's dip test rejecting unimodality of q, chirp mass or distance; complements the peak count above | WARNING | p ≤ 0.01 |
+| `snr_negative` | negative samples in a matched-filter or optimal SNR column | WARNING | any |
 | `spin_prior_comparison` | spins pushed to the bounds, relative to the prior | WARNING | more than 10% more posterior than prior beyond 0.7 (a₁, a₂, χp) or ±0.9 (χeff) |
 | `snr_plausibility` | a signal which isn't there, is too loud for a near-threshold candidate, or sits in one detector | WARNING | ln Bayes factor < 1 or network SNR < 4; network SNR > 20; one detector holding more than 75% of the SNR² |
 | `effective_sample_size` | too few independent samples | FAIL / WARNING | the sampler's effective sample size < 1000 / < 2500 (the sample count if not stored) |
@@ -88,6 +102,12 @@ arguments in each analysis' configuration are the intended ones
   railing is the check which reports that.
 * The checks screen; they do not replace looking at the data.  A glitch which
   produces a plausible posterior will pass them all.
+
+## The rest of this repository
+
+The repository also holds the scripts and Makefile which drive a catalogue
+release from an asimov ledger.  They are not part of the installed package; see
+[docs/release-pipeline.md](docs/release-pipeline.md).
 
 ## Development
 
