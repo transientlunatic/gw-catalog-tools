@@ -3,3 +3,5 @@ prune scripts
 prune examples
 prune docs
 exclude tests/conftest.py tests/test_config_consistency.py tests/test_release_files.py tests/test_release_quality.py
+prune .github
+exclude CLAUDE.md Makefile .gitignore
